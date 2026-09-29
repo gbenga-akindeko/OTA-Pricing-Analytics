@@ -42,6 +42,10 @@ function onOpen() {
     .addSeparator()
     .addItem('Push config to BigQuery', 'syncConfigToBigQuery')
     .addItem('Send morning digest now', 'sendMorningDigest')
+    .addSeparator()
+    .addItem('Build top routes from sales', 'buildTopRoutes')
+    .addItem('Create today\'s competitor check', 'buildCompetitorChecks')
+    .addItem('Send competitor checks to FareIQ', 'pushCompetitorChecks')
     .addToUi();
 }
 
