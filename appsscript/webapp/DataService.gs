@@ -166,14 +166,24 @@ function getRouteAnalysis(routeKey, days) {
 
 function getRouteElasticity(routeKey) {
   if (!/^[A-Z]{3}-[A-Z]{3}$/.test(String(routeKey || ''))) return { columns: [], rows: [] };
-  return cachedQuery_('elasticity_' + routeKey, 3600, function () {
-    return q_(
-      'SELECT cabin, ROUND(elasticity, 2) AS elasticity, elasticity_source, ' +
-      '       weeks, total_pax ' +
-      'FROM `' + CFG.PROJECT_ID + '.tvd_fareiq_ml.route_elasticity` ' +
-      'WHERE route_key = @rk',
-      [strParam_('rk', routeKey)]);
-  });
+  try {
+    return cachedQuery_('elasticity_' + routeKey, 3600, function () {
+      return q_(
+        'SELECT cabin, ROUND(elasticity, 2) AS elasticity, elasticity_source, ' +
+        '       weeks, total_pax ' +
+        'FROM `' + CFG.PROJECT_ID + '.tvd_fareiq_ml.route_elasticity` ' +
+        'WHERE route_key = @rk',
+        [strParam_('rk', routeKey)]);
+    });
+  } catch (e) {
+    // The elasticity table is only built by the model refresh, which needs
+    // booking history. Until then the page shows "not estimated" instead of
+    // failing. Not cached, so it appears as soon as the table exists.
+    if (/route_elasticity was not found|Not found: Table/.test(String(e.message))) {
+      return { columns: [], rows: [] };
+    }
+    throw e;
+  }
 }
 
 function getOpportunities() {
