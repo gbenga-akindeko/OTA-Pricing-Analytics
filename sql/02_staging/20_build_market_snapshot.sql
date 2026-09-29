@@ -114,6 +114,44 @@ FROM `${PROJECT}.tvd_fareiq_mart.fact_booking`
 WHERE booking_date >= DATE_SUB(DATE(window_start), INTERVAL 30 DAY)
 GROUP BY route_key, departure_date, cabin, pos_country;
 
+-- Our cost as a share of our selling price, from real tickets. The sales
+-- register records the issue date but not the departure date, so its tickets
+-- cannot be matched to a cell by date. Instead, where no exact booking exists
+-- for the cell, supplier cost is estimated as our price times the cost ratio
+-- we actually achieved on that route and cabin over the last 180 days. That
+-- makes the engine's margin the margin TravelDen really earns there.
+-- Falls back from route and cabin, to route, to cabin across all routes.
+-- Synthetic MOCK bookings are excluded so they cannot dilute real ratios.
+CREATE TEMP TABLE cost_ratio_route_cabin AS
+SELECT route_key, cabin,
+       SAFE_DIVIDE(SUM(supplier_cost_base), SUM(selling_price_base)) AS cost_ratio
+FROM `${PROJECT}.tvd_fareiq_mart.fact_booking`
+WHERE booking_date >= DATE_SUB(DATE(window_start), INTERVAL 180 DAY)
+  AND status IN ('TICKETED', 'BOOKED') AND COALESCE(channel, '') != 'MOCK'
+  AND selling_price_base > 0 AND supplier_cost_base > 0
+GROUP BY route_key, cabin
+HAVING COUNT(*) >= 5;
+
+CREATE TEMP TABLE cost_ratio_route AS
+SELECT route_key,
+       SAFE_DIVIDE(SUM(supplier_cost_base), SUM(selling_price_base)) AS cost_ratio
+FROM `${PROJECT}.tvd_fareiq_mart.fact_booking`
+WHERE booking_date >= DATE_SUB(DATE(window_start), INTERVAL 180 DAY)
+  AND status IN ('TICKETED', 'BOOKED') AND COALESCE(channel, '') != 'MOCK'
+  AND selling_price_base > 0 AND supplier_cost_base > 0
+GROUP BY route_key
+HAVING COUNT(*) >= 5;
+
+CREATE TEMP TABLE cost_ratio_cabin AS
+SELECT cabin,
+       SAFE_DIVIDE(SUM(supplier_cost_base), SUM(selling_price_base)) AS cost_ratio
+FROM `${PROJECT}.tvd_fareiq_mart.fact_booking`
+WHERE booking_date >= DATE_SUB(DATE(window_start), INTERVAL 180 DAY)
+  AND status IN ('TICKETED', 'BOOKED') AND COALESCE(channel, '') != 'MOCK'
+  AND selling_price_base > 0 AND supplier_cost_base > 0
+GROUP BY cabin
+HAVING COUNT(*) >= 20;
+
 
 MERGE `${PROJECT}.tvd_fareiq_mart.fact_market_snapshot` T
 USING (
@@ -143,9 +181,9 @@ USING (
     SAFE_DIVIDE(m.our_comparable_cost, NULLIF(m.market_median, 0))              AS price_index_vs_median,
     SAFE_DIVIDE(m.our_comparable_cost, NULLIF(c.cheapest_competitor_price, 0))  AS price_index_vs_cheapest,
 
-    oc.our_supplier_cost,
-    m.our_comparable_cost - oc.our_supplier_cost AS our_gross_margin_abs,
-    SAFE_DIVIDE(m.our_comparable_cost - oc.our_supplier_cost, NULLIF(m.our_comparable_cost, 0)) AS our_gross_margin_pct,
+    CAST(COALESCE(oc.our_supplier_cost, m.our_displayed_total * COALESCE(crc.cost_ratio, crr.cost_ratio, crb.cost_ratio)) AS NUMERIC) AS our_supplier_cost,
+    CAST(m.our_comparable_cost - COALESCE(oc.our_supplier_cost, m.our_displayed_total * COALESCE(crc.cost_ratio, crr.cost_ratio, crb.cost_ratio)) AS NUMERIC) AS our_gross_margin_abs,
+    CAST(SAFE_DIVIDE(m.our_comparable_cost - COALESCE(oc.our_supplier_cost, m.our_displayed_total * COALESCE(crc.cost_ratio, crr.cost_ratio, crb.cost_ratio)), NULLIF(m.our_comparable_cost, 0)) AS NUMERIC) AS our_gross_margin_pct,
 
     SAFE_DIVIDE(m.market_median - h1.market_median, NULLIF(h1.market_median, 0)) AS median_change_1d_pct,
     SAFE_DIVIDE(m.market_median - h7.market_median, NULLIF(h7.market_median, 0)) AS median_change_7d_pct,
@@ -157,6 +195,9 @@ USING (
   LEFT JOIN second_cheapest sc USING (collection_window, route_key, departure_date, cabin, trip_type, pos_country)
   LEFT JOIN our_rank r        USING (collection_window, route_key, departure_date, cabin, trip_type, pos_country)
   LEFT JOIN our_cost oc       USING (route_key, departure_date, cabin, pos_country)
+  LEFT JOIN cost_ratio_route_cabin crc ON crc.route_key = m.route_key AND crc.cabin = m.cabin
+  LEFT JOIN cost_ratio_route crr       ON crr.route_key = m.route_key
+  LEFT JOIN cost_ratio_cabin crb       ON crb.cabin = m.cabin
   LEFT JOIN `${PROJECT}.tvd_fareiq_mart.fact_market_snapshot` h1
          ON h1.route_key = m.route_key AND h1.departure_date = m.departure_date
         AND h1.cabin = m.cabin AND h1.pos_country = m.pos_country

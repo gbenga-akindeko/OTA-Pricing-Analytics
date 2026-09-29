@@ -46,6 +46,7 @@ function onOpen() {
     .addItem('Build top routes from sales', 'buildTopRoutes')
     .addItem('Create today\'s competitor check', 'buildCompetitorChecks')
     .addItem('Send competitor checks to FareIQ', 'pushCompetitorChecks')
+    .addItem('Sync bookings from sales register', 'syncBookingsToFareIQ')
     .addToUi();
 }
 
@@ -425,6 +426,8 @@ function logSync_(ss, results) {
 // ===================================================================
 function installTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  // 05:00 real bookings in, 05:30 transform (Cloud Scheduler), then the review.
+  ScriptApp.newTrigger('syncBookingsToFareIQ').timeBased().atHour(5).nearMinute(0).everyDays(1).create();
   ScriptApp.newTrigger('pullDailyReview').timeBased().atHour(6).nearMinute(45).everyDays(1).create();
   ScriptApp.newTrigger('sendMorningDigest').timeBased().atHour(7).nearMinute(0).everyDays(1).create();
 }
