@@ -14,11 +14,16 @@ const CFG = {
   get TIMEZONE()     { return 'Africa/Lagos'; },
   get CURRENCY()     { return '₦'; },
 
-  // Who may see what. Groups are resolved at request time, so an access
-  // change in Workspace takes effect on the next page load.
-  get GROUP_ANALYSTS() { return prop_('GROUP_ANALYSTS'); },
-  get GROUP_LEADS()    { return prop_('GROUP_LEADS'); },
-  get GROUP_EXEC()     { return prop_('GROUP_EXEC'); },
+  // Who may see what. Either name people directly (comma separated emails)
+  // or point at Workspace groups, or both. Both are read at request time, so
+  // a change takes effect on the next page load. Named emails suit people
+  // outside the domain, whom a domain group may not be allowed to hold.
+  get USERS_LEADS()    { return prop_('USERS_LEADS', ''); },
+  get USERS_ANALYSTS() { return prop_('USERS_ANALYSTS', ''); },
+  get USERS_EXEC()     { return prop_('USERS_EXEC', ''); },
+  get GROUP_ANALYSTS() { return prop_('GROUP_ANALYSTS', ''); },
+  get GROUP_LEADS()    { return prop_('GROUP_LEADS', ''); },
+  get GROUP_EXEC()     { return prop_('GROUP_EXEC', ''); },
 
   // Cost guards. A runaway query should fail, not bill.
   MAX_BYTES_BILLED: '2000000000',     // 2 GB per query
@@ -68,8 +73,11 @@ function setupScriptProperties() {
     BQ_LOCATION: 'europe-west2',
     PRICING_SERVICE_URL: 'https://tvd-ota-fareiq-pricing-xxxxx.a.run.app',
     CONFIG_SHEET_ID: 'your-pricing-config-sheet-id',
-    GROUP_ANALYSTS: 'pricing-analysts@yourdomain.com',
-    GROUP_LEADS: 'pricing-leads@yourdomain.com',
-    GROUP_EXEC: 'commercial-exec@yourdomain.com',
+    USERS_LEADS: 'lead@yourdomain.com',
+    USERS_ANALYSTS: '',
+    USERS_EXEC: 'viewer1@yourdomain.com,viewer2@partner.com',
+    GROUP_ANALYSTS: '',
+    GROUP_LEADS: '',
+    GROUP_EXEC: '',
   }, false);
 }

@@ -55,10 +55,19 @@ function resolveAccess_() {
   if (!email) return { email: '(unknown)', role: null };
 
   // Most specific role wins, so a lead who is also an analyst gets lead.
-  if (inGroup_(CFG.GROUP_LEADS, email))    return { email: email, role: 'lead' };
-  if (inGroup_(CFG.GROUP_ANALYSTS, email)) return { email: email, role: 'analyst' };
-  if (inGroup_(CFG.GROUP_EXEC, email))     return { email: email, role: 'exec' };
+  // A role is granted by a named email in Script Properties or by group
+  // membership. Anyone matched by neither is refused.
+  if (inList_(CFG.USERS_LEADS, email)    || inGroup_(CFG.GROUP_LEADS, email))    return { email: email, role: 'lead' };
+  if (inList_(CFG.USERS_ANALYSTS, email) || inGroup_(CFG.GROUP_ANALYSTS, email)) return { email: email, role: 'analyst' };
+  if (inList_(CFG.USERS_EXEC, email)     || inGroup_(CFG.GROUP_EXEC, email))     return { email: email, role: 'exec' };
   return { email: email, role: null };
+}
+
+/** Comma separated email list from a script property, compared case-blind. */
+function inList_(list, userEmail) {
+  if (!list || !userEmail) return false;
+  const me = String(userEmail).trim().toLowerCase();
+  return String(list).split(',').some(function (e) { return e.trim().toLowerCase() === me; });
 }
 
 function inGroup_(groupEmail, userEmail) {
