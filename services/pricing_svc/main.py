@@ -16,6 +16,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import FastAPI, Header, HTTPException
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery
 from pydantic import BaseModel
 
@@ -51,6 +52,23 @@ def load_rules() -> PolicyResolver:
     rules = [PricingRule(**{k: (float(v) if k.endswith(("_pct", "_abs", "_index")) and v is not None else v)
                             for k, v in dict(r).items()}) for r in rows]
     return PolicyResolver(rules)
+
+
+def elasticity_source() -> str:
+    """The elasticity table, or an empty stand-in when it does not exist yet.
+
+    route_elasticity is only built by /refresh-models, which needs booking
+    history to train on. Until then every cell falls back to the engine's
+    default elasticity instead of the whole run failing on a missing table.
+    """
+    table = f"{PROJECT}.tvd_fareiq_ml.route_elasticity"
+    try:
+        bq.get_table(table)
+        return f"`{table}`"
+    except NotFound:
+        log.warning("%s not found; using the default elasticity for every cell", table)
+        return ("(SELECT CAST(NULL AS STRING) AS route_key, CAST(NULL AS STRING) AS cabin, "
+                "CAST(NULL AS NUMERIC) AS elasticity, CAST(NULL AS STRING) AS elasticity_source)")
 
 
 def load_cells(review_date: date) -> list[dict]:
@@ -99,7 +117,7 @@ def load_cells(review_date: date) -> list[dict]:
       c.marketing_carrier
     FROM latest l
     LEFT JOIN demand d ON d.series_id = CONCAT(l.route_key, '|', l.cabin)
-    LEFT JOIN `{PROJECT}.tvd_fareiq_ml.route_elasticity` e
+    LEFT JOIN {elasticity_source()} e
            ON e.route_key = l.route_key AND e.cabin = l.cabin
     LEFT JOIN fees f USING (route_key, departure_date, cabin)
     LEFT JOIN `{PROJECT}.tvd_fareiq_mart.dim_route` r ON r.route_key = l.route_key
@@ -157,7 +175,16 @@ class RunRequest(BaseModel):
 def recommend(req: RunRequest, authorization: str = Header(default="")):
     if not authorization:
         raise HTTPException(401, "OIDC token required")
+    try:
+        return run_recommendations(req)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("recommendation run failed")
+        raise HTTPException(500, f"{type(exc).__name__}: {exc}")
 
+
+def run_recommendations(req: RunRequest) -> dict:
     review_date = req.review_date or date.today()
     resolver = load_rules()
     rows = load_cells(review_date)
