@@ -250,15 +250,19 @@ def _bq_safe(value):
     """Make engine output acceptable to a streaming insert.
 
     NUMERIC holds 9 decimal places and rejects NaN and infinity, while the
-    engine works in plain floats (a freshness of 0.8333333333333334, say).
-    Round every float to fit and turn non-finite values into NULL.
+    engine works in plain floats. Rounding the float is not enough: a JSON
+    number is read back as a binary double, so 5189541.968911917 arrives as
+    5189541.9689119169... and is refused. Send each float as an exact decimal
+    string instead, which BigQuery accepts for NUMERIC, and turn non-finite
+    values into NULL. Every numeric column in fact_price_recommendation is
+    NUMERIC, so this is safe for the whole row.
     """
     if isinstance(value, dict):
         return {k: _bq_safe(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_bq_safe(v) for v in value]
     if isinstance(value, float):
-        return round(value, 9) if math.isfinite(value) else None
+        return f"{value:.9f}" if math.isfinite(value) else None
     return value
 
 
