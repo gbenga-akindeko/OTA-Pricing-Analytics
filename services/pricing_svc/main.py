@@ -11,6 +11,7 @@ writer to fact_price_decision.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -228,10 +229,11 @@ def run_recommendations(req: RunRequest) -> dict:
                 "sample": out[:3]}
 
     if out:
-        errors = bq.insert_rows_json(f"{PROJECT}.tvd_fareiq_mart.fact_price_recommendation", out)
+        errors = bq.insert_rows_json(f"{PROJECT}.tvd_fareiq_mart.fact_price_recommendation",
+                                     [_bq_safe(r) for r in out])
         if errors:
             log.error("recommendation insert errors: %s", errors[:5])
-            raise HTTPException(500, "recommendation write failed")
+            raise HTTPException(500, f"recommendation write failed: {errors[:3]}")
 
     actionable = [r for r in out if r["action"] != "HOLD"]
     return {
@@ -242,6 +244,22 @@ def run_recommendations(req: RunRequest) -> dict:
         "engine_version": ENGINE_VERSION,
         "ruleset_version": ruleset_version,
     }
+
+
+def _bq_safe(value):
+    """Make engine output acceptable to a streaming insert.
+
+    NUMERIC holds 9 decimal places and rejects NaN and infinity, while the
+    engine works in plain floats (a freshness of 0.8333333333333334, say).
+    Round every float to fit and turn non-finite values into NULL.
+    """
+    if isinstance(value, dict):
+        return {k: _bq_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_bq_safe(v) for v in value]
+    if isinstance(value, float):
+        return round(value, 9) if math.isfinite(value) else None
+    return value
 
 
 def _rec_row(rec, generated_at, review_date, ruleset_version) -> dict:
