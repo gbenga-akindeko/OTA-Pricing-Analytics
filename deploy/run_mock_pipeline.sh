@@ -28,6 +28,8 @@
 #   HORIZONS        default "1,3,7,14,21,30,45,60,90"
 #   CABINS          default "ECONOMY","BUSINESS"
 #   WINDOW_HOURS    default 72
+#   TRIPS           default "ONE_WAY","ROUND_TRIP"
+#   STAY_DAYS       default 14 (return date for round trips)
 #
 # Everything the mock writes carries source_id 'mock_market' and seller ids
 # starting 'mock_'; seeded bookings carry channel 'MOCK'.
@@ -43,6 +45,8 @@ SCHEDULER_SA="tvd-ota-fareiq-scheduler@${PROJECT}.iam.gserviceaccount.com"
 T1_JOB="tvd-ota-fareiq-collector-t1"
 HORIZONS="${HORIZONS:-1,3,7,14,21,30,45,60,90}"
 CABINS="${CABINS:-\"ECONOMY\",\"BUSINESS\"}"
+TRIPS="${TRIPS:-\"ONE_WAY\",\"ROUND_TRIP\"}"
+STAY_DAYS="${STAY_DAYS:-14}"
 WINDOW_HOURS="${WINDOW_HOURS:-72}"
 
 APPLY=0; SCHEDULE=0; COLLECT=1; SEED=0
@@ -52,7 +56,7 @@ for arg in "$@"; do
     --schedule)     SCHEDULE=1 ;;
     --skip-collect) COLLECT=0 ;;
     --seed-bookings) SEED=1 ;;
-    -h|--help)      sed -n '2,34p' "$0"; exit 0 ;;
+    -h|--help)      sed -n '2,36p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -155,7 +159,7 @@ ok "$routes monitored T1 route(s)"
 # ----------------------------------------------------------------------------
 if [[ "$COLLECT" == "1" ]]; then
   say "Collecting mock offers through $COLLECTOR_SVC"
-  body="{\"tier\":\"T1\",\"source_ids\":[\"mock_market\"],\"horizon_days\":[${HORIZONS}],\"cabins\":[${CABINS}]}"
+  body="{\"tier\":\"T1\",\"source_ids\":[\"mock_market\"],\"horizon_days\":[${HORIZONS}],\"cabins\":[${CABINS}],\"trip_types\":[${TRIPS}],\"stay_days\":${STAY_DAYS}}"
   resp="$(post "$COLLECTOR_URL/collect" "$body")" || die "Collection failed (response above)."
   offers="$(printf '%s' "$resp" | jget 'd["offers"]')"
   loaded="$(printf '%s' "$resp" | jget 'd["rows_loaded"]')"
@@ -286,7 +290,7 @@ if [[ "$SCHEDULE" == "1" ]]; then
   done
   ok "scheduler can invoke $COLLECTOR_SVC and $PRICING_SVC"
 
-  collect_body="{\"tier\":\"T1\",\"source_ids\":[\"mock_market\"],\"horizon_days\":[${HORIZONS}],\"cabins\":[${CABINS}]}"
+  collect_body="{\"tier\":\"T1\",\"source_ids\":[\"mock_market\"],\"horizon_days\":[${HORIZONS}],\"cabins\":[${CABINS}],\"trip_types\":[${TRIPS}],\"stay_days\":${STAY_DAYS}}"
   if gcloud scheduler jobs describe "$T1_JOB" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
     gcloud scheduler jobs update http "$T1_JOB" --location="$REGION" --project="$PROJECT" \
       --schedule="0 * * * *" --time-zone="Africa/Lagos" \

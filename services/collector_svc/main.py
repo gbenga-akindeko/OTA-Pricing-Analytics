@@ -65,6 +65,11 @@ class CollectRequest(BaseModel):
     horizon_days: list[int] = Field(default_factory=lambda: [1, 3, 7, 14, 21, 30, 45, 60, 90])
     cabins: list[str] = Field(default_factory=lambda: ["ECONOMY"])
     pos_countries: list[str] = Field(default_factory=lambda: ["NG"])
+    # TravelDen sells mostly round trips (85 to 97% of tickets on the top
+    # routes), and a return fare is not twice a one way fare, so both are
+    # shopped. The return leg is priced stay_days after departure.
+    trip_types: list[str] = Field(default_factory=lambda: ["ONE_WAY", "ROUND_TRIP"])
+    stay_days: int = 14
     max_requests: int = 5000
     dry_run: bool = False
 
@@ -91,13 +96,18 @@ def build_work_queue(req: CollectRequest) -> list[ShopRequest]:
         for horizon in req.horizon_days:
             for cabin in req.cabins:
                 for pos in req.pos_countries:
-                    queue.append(ShopRequest(
-                        origin=row.origin, destination=row.destination,
-                        departure_date=today + timedelta(days=horizon),
-                        cabin=cabin, pos_country=pos, currency="NGN",
-                    ))
-                    if len(queue) >= req.max_requests:
-                        return queue
+                    for trip in req.trip_types:
+                        dep = today + timedelta(days=horizon)
+                        round_trip = trip.upper() == "ROUND_TRIP"
+                        queue.append(ShopRequest(
+                            origin=row.origin, destination=row.destination,
+                            departure_date=dep,
+                            return_date=dep + timedelta(days=req.stay_days) if round_trip else None,
+                            trip_type="ROUND_TRIP" if round_trip else "ONE_WAY",
+                            cabin=cabin, pos_country=pos, currency="NGN",
+                        ))
+                        if len(queue) >= req.max_requests:
+                            return queue
     return queue
 
 

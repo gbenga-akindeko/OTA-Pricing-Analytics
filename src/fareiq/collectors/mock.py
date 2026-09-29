@@ -132,6 +132,8 @@ class MockMarketCollector(BaseCollector):
         carriers = CARRIERS.get(request.route_key, ["XX"])
         cabin_mult = {"ECONOMY": 1.0, "PREMIUM_ECONOMY": 1.9,
                       "BUSINESS": 3.4, "FIRST": 6.0}.get(request.cabin, 1.0)
+        # A return fare is cheaper than two one ways, as it is on real fares.
+        trip_mult = 1.8 if request.return_date else 1.0
 
         raws: list[dict] = []
         for seller in self.sellers:
@@ -150,6 +152,7 @@ class MockMarketCollector(BaseCollector):
 
                 price = (base
                          * cabin_mult
+                         * trip_mult
                          * booking_curve(days_out)
                          * seasonality(datetime.combine(request.departure_date,
                                                         datetime.min.time()),

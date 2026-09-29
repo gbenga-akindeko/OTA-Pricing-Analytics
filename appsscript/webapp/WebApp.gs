@@ -21,8 +21,13 @@ function doGet(e) {
     return HtmlService.createHtmlOutput(
       '<div style="font:15px Garamond,Georgia,serif;padding:48px;color:#17262F">' +
       '<h2 style="margin:0 0 8px">No access</h2>' +
-      '<p>' + escapeHtml_(access.email) + ' is not a member of a FareIQ pricing group. ' +
-      'Ask the pricing lead to add you, then reload.</p></div>')
+      (access.email === '(unknown)'
+        ? '<p>Google did not tell FareIQ who you are. This happens when you are signed in ' +
+          'with an account outside travelden.com, or with more than one Google account at once. ' +
+          'Open the link in a private window signed in only with your travelden.com account.</p>'
+        : '<p>You are signed in as <b>' + escapeHtml_(access.email) + '</b>, which is not on the ' +
+          'FareIQ access list. Send this exact address to the pricing lead, then reload.</p>') +
+      '</div>')
       .setTitle('TVD OTA FareIQ');
   }
 

@@ -58,7 +58,7 @@ function getDailyReview(filters) {
 
     return q_(
       'SELECT recommendation_id, route_key, origin_city, destination_city, ' +
-      '       marketing_carrier, departure_date, cabin, days_to_departure, ' +
+      '       marketing_carrier, departure_date, cabin, trip_type, days_to_departure, ' +
       '       our_price, our_true_customer_cost, cheapest_competitor, ' +
       '       cheapest_competitor_price, market_median, price_gap, price_gap_pct, ' +
       '       price_index, our_market_rank, panel_size, current_margin_pct, ' +

@@ -28,6 +28,8 @@ const CONFIG = {
     LOG: 'Sync Log'
   },
   DIGEST_RECIPIENTS: PropertiesService.getScriptProperties().getProperty('DIGEST_RECIPIENTS'),
+  // Copied on the morning digest. Comma separated.
+  DIGEST_CC: PropertiesService.getScriptProperties().getProperty('DIGEST_CC') || '',
   MAX_REVIEW_ROWS: 300
 };
 
@@ -272,7 +274,8 @@ function submitDecisions() {
 function sendMorningDigest() {
   const exec = runQuery_('SELECT * FROM `' + CONFIG.PROJECT_ID + '.tvd_fareiq_mart.v_exec_overview`');
   const top = runQuery_(
-    'SELECT route_key, departure_date, cabin, action, priority, our_price, ' +
+    'SELECT route_key, IF(trip_type = "ROUND_TRIP", "Return", "One way") AS trip, ' +
+    '       departure_date, cabin, action, priority, our_price, ' +
     '       cheapest_competitor_price, price_index, recommended_price, ' +
     '       expected_margin_impact, confidence, rationale ' +
     'FROM `' + CONFIG.PROJECT_ID + '.tvd_fareiq_mart.v_daily_pricing_review` ' +
@@ -293,6 +296,7 @@ function sendMorningDigest() {
   const html = buildDigestHtml_(exec, top, fees, moves);
   MailApp.sendEmail({
     to: CONFIG.DIGEST_RECIPIENTS,
+    cc: CONFIG.DIGEST_CC,
     subject: 'TVD OTA FareIQ pricing review :: ' + Utilities.formatDate(new Date(), 'Africa/Lagos', 'EEE d MMM yyyy'),
     htmlBody: html,
     noReply: true
@@ -320,7 +324,7 @@ function buildDigestHtml_(exec, top, fees, moves) {
   html += '</tr></table>';
 
   html += section_('Recommended price changes', top,
-    ['route_key', 'departure_date', 'action', 'priority', 'our_price',
+    ['route_key', 'trip', 'departure_date', 'action', 'priority', 'our_price',
      'cheapest_competitor_price', 'recommended_price', 'expected_margin_impact', 'confidence']);
   html += section_('Airline fee changes', fees,
     ['carrier', 'fee_type', 'previous_amount', 'new_amount', 'change_pct']);
