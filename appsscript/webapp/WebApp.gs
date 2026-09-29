@@ -172,7 +172,7 @@ function submitDecision(payload) {
   const resp = UrlFetchApp.fetch(CFG.PRICING_URL + '/decision', {
     method: 'post',
     contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + ScriptApp.getIdentityToken() },
+    headers: { Authorization: 'Bearer ' + pricingToken_() },
     payload: JSON.stringify(body),
     muteHttpExceptions: true,
   });
@@ -189,6 +189,43 @@ function submitDecision(payload) {
   let message = resp.getContentText();
   try { message = JSON.parse(message).detail || message; } catch (e) {}
   return { ok: false, status: code, message: String(message).slice(0, 400) };
+}
+
+/**
+ * An ID token the pricing service will accept.
+ *
+ * Cloud Run only honours a token whose audience is the service URL, and
+ * ScriptApp.getIdentityToken() cannot set one. So the app asks the IAM
+ * Credentials API for a token as the FareIQ workspace service account, with
+ * the pricing URL as audience. That account holds run.invoker on the pricing
+ * service; the human who acted still travels in the request body as
+ * decided_by. The deploying user needs Service Account OpenID Connect
+ * Identity Token Creator on that account. Tokens are cached for 50 minutes.
+ */
+function pricingToken_() {
+  const cache = CacheService.getScriptCache();
+  const key = 'pricing_id_token';
+  const hit = cache.get(key);
+  if (hit) return hit;
+
+  const sa = CFG.PRICING_INVOKER_SA;
+  const resp = UrlFetchApp.fetch(
+    'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' +
+      encodeURIComponent(sa) + ':generateIdToken',
+    {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      payload: JSON.stringify({ audience: CFG.PRICING_URL.replace(/\/+$/, ''), includeEmail: true }),
+      muteHttpExceptions: true,
+    });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('Could not get a token for the pricing service as ' + sa + ': ' +
+                    resp.getContentText().slice(0, 300));
+  }
+  const token = JSON.parse(resp.getContentText()).token;
+  cache.put(key, token, 3000);
+  return token;
 }
 
 /** Approve several rows in one action, reporting per-row outcomes. */

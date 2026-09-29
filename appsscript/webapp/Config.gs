@@ -10,6 +10,12 @@ const CFG = {
   get PROJECT_ID()   { return prop_('GCP_PROJECT'); },
   get BQ_LOCATION()  { return prop_('BQ_LOCATION', 'europe-west2'); },
   get PRICING_URL()  { return prop_('PRICING_SERVICE_URL'); },
+  // The identity the app calls the pricing service as. It must hold
+  // run.invoker on the pricing service.
+  get PRICING_INVOKER_SA() {
+    return prop_('PRICING_INVOKER_SA',
+                 'tvd-ota-fareiq-workspace@' + prop_('GCP_PROJECT') + '.iam.gserviceaccount.com');
+  },
   get SHEET_ID()     { return prop_('CONFIG_SHEET_ID'); },
   get TIMEZONE()     { return 'Africa/Lagos'; },
   get CURRENCY()     { return '₦'; },

@@ -229,11 +229,23 @@ def run_recommendations(req: RunRequest) -> dict:
                 "sample": out[:3]}
 
     if out:
-        errors = bq.insert_rows_json(f"{PROJECT}.tvd_fareiq_mart.fact_price_recommendation",
-                                     [_bq_safe(r) for r in out])
-        if errors:
-            log.error("recommendation insert errors: %s", errors[:5])
-            raise HTTPException(500, f"recommendation write failed: {errors[:3]}")
+        # A load job, not a streaming insert. Streamed rows sit in a buffer
+        # that UPDATE cannot touch for up to ~90 minutes, and /decision
+        # updates the recommendation's status the moment an analyst acts.
+        table = bq.get_table(f"{PROJECT}.tvd_fareiq_mart.fact_price_recommendation")
+        job = bq.load_table_from_json(
+            [_bq_safe(r) for r in out], table,
+            job_config=bigquery.LoadJobConfig(
+                schema=table.schema,
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+            ),
+            location=BQ_LOCATION,
+        )
+        try:
+            job.result()
+        except Exception as exc:
+            log.error("recommendation load failed: %s", job.errors)
+            raise HTTPException(500, f"recommendation write failed: {job.errors or exc}")
 
     actionable = [r for r in out if r["action"] != "HOLD"]
     return {
@@ -348,7 +360,7 @@ def decision(d: Decision, authorization: str = Header(default="")):
             f"config sheet if this floor is wrong."
         )
 
-    errors = bq.insert_rows_json(f"{PROJECT}.tvd_fareiq_mart.fact_price_decision", [{
+    errors = bq.insert_rows_json(f"{PROJECT}.tvd_fareiq_mart.fact_price_decision", [_bq_safe({
         "decision_id": uuid.uuid4().hex,
         "recommendation_id": d.recommendation_id,
         "decided_at": datetime.now(timezone.utc).isoformat(),
@@ -371,20 +383,29 @@ def decision(d: Decision, authorization: str = Header(default="")):
         "expected_revenue_impact": float(r["expected_revenue_impact"] or 0),
         "confidence": float(r["confidence"]),
         "apply_status": "PENDING" if approved is not None else None,
-    }])
+    })])
     if errors:
         raise HTTPException(500, f"audit write failed: {errors[:2]}")
 
-    bq.query(f"""
-        UPDATE `{PROJECT}.tvd_fareiq_mart.fact_price_recommendation`
-        SET status = @status
-        WHERE recommendation_id = @rid AND review_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-    """, job_config=bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("status", "STRING", d.decision),
-        bigquery.ScalarQueryParameter("rid", "STRING", d.recommendation_id),
-    ]), location=BQ_LOCATION).result()
+    # The decision is already in the audit trail. Marking the recommendation
+    # is secondary: if it cannot happen yet (rows still in a streaming
+    # buffer from an older run), say so rather than fail a recorded decision.
+    try:
+        bq.query(f"""
+            UPDATE `{PROJECT}.tvd_fareiq_mart.fact_price_recommendation`
+            SET status = @status
+            WHERE recommendation_id = @rid AND review_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+        """, job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("status", "STRING", d.decision),
+            bigquery.ScalarQueryParameter("rid", "STRING", d.recommendation_id),
+        ]), location=BQ_LOCATION).result()
+        status_updated = True
+    except Exception as exc:
+        log.warning("decision recorded but status update deferred: %s", exc)
+        status_updated = False
 
-    return {"status": "recorded", "approved_price": approved}
+    return {"status": "recorded", "approved_price": approved,
+            "recommendation_status_updated": status_updated}
 
 
 # ---------------------------------------------------------------- transform
