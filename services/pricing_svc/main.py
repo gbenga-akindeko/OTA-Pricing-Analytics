@@ -352,7 +352,8 @@ def transform(req: TransformRequest, authorization: str = Header(default="")):
     end = req.window_end or datetime.now(timezone.utc)
     start = end - timedelta(hours=max(req.window_hours, 1))
     params = [sql_runner.ts_param("window_start", start),
-              sql_runner.ts_param("window_end", end)]
+              sql_runner.ts_param("window_end", end),
+              bigquery.ScalarQueryParameter("base_currency", "STRING", cfg.base_currency)]
 
     steps = []
     for path in ("02_staging/10_build_fact_offer.sql",
@@ -497,7 +498,7 @@ def measure_outcomes(req: OutcomeRequest, authorization: str = Header(default=""
     return {"measured": results}
 
 
-@app.get("/healthz")
+@app.get("/health")
 def healthz():
     """Liveness plus the two facts a deploy smoke test needs: which build is
     serving, and whether it can actually reach BigQuery."""

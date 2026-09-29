@@ -22,11 +22,20 @@ deploy_one () {
   local dir="$1" name="$2" mem="$3" cpu="$4" timeout="$5" conc="$6" maxi="$7"
 
   say "Building ${name}"
-  docker build -f "services/${dir}/Dockerfile" -t "${AR}/${dir}:${SHA}" -t "${AR}/${dir}:latest" .
+  docker build --platform linux/amd64 -f "services/${dir}/Dockerfile" -t "${AR}/${dir}:${SHA}" -t "${AR}/${dir}:latest" .
   docker push "${AR}/${dir}:${SHA}"
   docker push "${AR}/${dir}:latest"
 
-  say "Deploying ${name} with no traffic"
+  # --no-traffic is refused when the service does not exist yet, so the very
+  # first deploy of a service takes traffic directly. Every later deploy goes
+  # in dark and is only promoted after the smoke test.
+  local traffic_flags=(--no-traffic --tag=candidate)
+  if ! gcloud run services describe "${name}" --region="${REGION}" \
+         --project="${PROJECT}" --format='value(metadata.name)' >/dev/null 2>&1; then
+    traffic_flags=()
+  fi
+
+  say "Deploying ${name}"
   gcloud run deploy "${name}" \
     --image="${AR}/${dir}:${SHA}" \
     --region="${REGION}" \
@@ -36,7 +45,7 @@ deploy_one () {
     --set-env-vars="GCP_PROJECT=${PROJECT},BQ_LOCATION=${LOC},GIT_SHA=${SHA},RAW_BUCKET=${RAW_BUCKET}" \
     --memory="${mem}" --cpu="${cpu}" --timeout="${timeout}" \
     --concurrency="${conc}" --min-instances=0 --max-instances="${maxi}" \
-    --no-traffic --tag=candidate
+    "${traffic_flags[@]}"
 
   say "Smoke testing the candidate revision"
   local cand token
@@ -44,8 +53,10 @@ deploy_one () {
           --format='value(status.traffic[?tag=`candidate`].url)' | head -1)"
   [[ -z "$cand" ]] && cand="$(gcloud run revisions list --service="${name}" \
           --region="${REGION}" --limit=1 --format='value(status.url)')"
+  [[ ${#traffic_flags[@]} -eq 0 ]] && cand="$(gcloud run services describe "${name}" \
+          --region="${REGION}" --format='value(status.url)')"
   token="$(gcloud auth print-identity-token)"
-  if ! curl -sf -H "Authorization: Bearer ${token}" "${cand}/healthz" | tee /dev/stderr | grep -q '"status":"ok"'; then
+  if ! curl -sf -H "Authorization: Bearer ${token}" "${cand}/health" | tee /dev/stderr | grep -q '"status":"ok"'; then
     echo "Smoke test FAILED. Traffic was not promoted; the previous revision is still live." >&2
     exit 1
   fi

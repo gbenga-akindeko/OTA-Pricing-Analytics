@@ -7,7 +7,7 @@ Adding a source means writing one adapter, not touching the pipeline.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -183,6 +183,9 @@ class NormalisedOffer:
             "source_id": self.source_id,
             "source_tier": self.source_tier.value,
             "collected_at": self.collected_at.isoformat(),
+            # NOT NULL in offer_snapshot. A column DEFAULT does not apply to a
+            # JSON load job, so the row has to carry it.
+            "ingested_at": datetime.now(timezone.utc).isoformat(),
             "gcs_uri": self.gcs_uri,
             "request_origin": r.origin,
             "request_destination": r.destination,

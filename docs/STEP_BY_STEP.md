@@ -546,7 +546,7 @@ Add `PRICING=` to `~/fareiq-env.sh`.
 > **Do this**
 
 ```bash
-curl -s -H "Authorization: Bearer $TOKEN" $PRICING/healthz | python3 -m json.tool
+curl -s -H "Authorization: Bearer $TOKEN" $PRICING/health | python3 -m json.tool
 ```
 
 > **You should see**

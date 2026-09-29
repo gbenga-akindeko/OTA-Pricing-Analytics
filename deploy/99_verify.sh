@@ -80,7 +80,7 @@ for name in tvd-ota-fareiq-collector tvd-ota-fareiq-pricing; do
   url="$(gcloud run services describe "$name" --region="$REGION" \
          --format='value(status.url)' 2>/dev/null)"
   if [[ -z "$url" ]]; then bad "${name}: not deployed"; continue; fi
-  body="$(curl -sf -m 30 -H "Authorization: Bearer ${token}" "${url}/healthz" 2>/dev/null)"
+  body="$(curl -sf -m 30 -H "Authorization: Bearer ${token}" "${url}/health" 2>/dev/null)"
   if grep -q '"status":"ok"' <<< "$body"; then
     ok "${name}: healthy ($(grep -o '"revision":"[^"]*"' <<< "$body" | cut -d'"' -f4))"
     if grep -q '"warehouse":"reachable"' <<< "$body"; then ok "${name}: can reach BigQuery"

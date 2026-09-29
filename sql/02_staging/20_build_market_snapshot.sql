@@ -123,14 +123,18 @@ USING (
     m.collection_window, m.snapshot_date, m.route_key, m.departure_date,
     m.cabin, m.trip_type, m.pos_country, m.days_to_departure, m.dtd_bucket,
     m.sellers_observed, m.competitor_sellers, m.offers_observed, m.carriers_observed,
-    LEAST(SAFE_DIVIDE(m.competitor_sellers, ${EXPECTED_PANEL_SIZE}), 1.0) AS coverage_score,
+    -- The target columns are NUMERIC. INT64/INT64 division and STDDEV both
+    -- return FLOAT64, which BigQuery will not assign implicitly, so cast here.
+    CAST(LEAST(SAFE_DIVIDE(m.competitor_sellers, ${EXPECTED_PANEL_SIZE}), 1.0) AS NUMERIC) AS coverage_score,
 
     c.cheapest_competitor_id,
     c.cheapest_competitor_price,
     sc.second_cheapest_price,
-    m.market_min, m.market_p25, m.market_median, m.market_mean, m.market_weighted_mean,
-    m.market_p75, m.market_max, m.market_stddev,
-    SAFE_DIVIDE(m.market_stddev, NULLIF(m.market_median, 0)) AS market_dispersion,
+    m.market_min, m.market_p25, m.market_median, m.market_mean,
+    CAST(m.market_weighted_mean AS NUMERIC) AS market_weighted_mean,
+    m.market_p75, m.market_max,
+    CAST(m.market_stddev AS NUMERIC) AS market_stddev,
+    CAST(SAFE_DIVIDE(m.market_stddev, NULLIF(m.market_median, 0)) AS NUMERIC) AS market_dispersion,
 
     m.our_seller_id, m.our_displayed_total, m.our_true_cost, m.our_comparable_cost,
     r.our_market_rank,

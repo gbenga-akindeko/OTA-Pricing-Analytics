@@ -348,7 +348,7 @@ gcloud run services update tvd-ota-fareiq-collector --region=$GCP_REGION \
 **Verify:**
 ```bash
 PRICING=$(gcloud run services describe tvd-ota-fareiq-pricing --region=$GCP_REGION --format='value(status.url)')
-curl -s -H "Authorization: Bearer $(gcloud auth print-identity-token)" $PRICING/healthz
+curl -s -H "Authorization: Bearer $(gcloud auth print-identity-token)" $PRICING/health
 ```
 
 Expect `"status":"ok"` and `"warehouse":"reachable"`. If the warehouse is

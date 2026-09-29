@@ -233,6 +233,6 @@ async def collect(req: CollectRequest, request: Request):
         raise HTTPException(500, str(exc))
 
 
-@app.get("/healthz")
+@app.get("/health")
 def healthz():
     return {"status": "ok", "revision": os.environ.get("K_REVISION", "local")}

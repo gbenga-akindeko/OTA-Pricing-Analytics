@@ -6,7 +6,11 @@
 # whole repository as context (they COPY src/ and sql/).
 #
 #   gcloud builds submit --config cloudbuild.yaml \
-#     --substitutions=_SERVICE=collector_svc,_REGION=europe-west2 .
+#     --substitutions=_SERVICE=collector_svc,_REGION=europe-west2,_TAG=$(date +%Y%m%d%H%M) .
+#
+# _TAG is required for a manual submit. $SHORT_SHA is only populated when the
+# build comes from a connected repository trigger, so a plain submit from a
+# laptop produced the invalid image name "collector_svc:".
 #
 # Building in the cloud also sidesteps the architecture trap: Cloud Build
 # always produces linux/amd64, which is what Cloud Run requires. A local
@@ -15,6 +19,7 @@
 substitutions:
   _SERVICE: collector_svc
   _REGION: europe-west2
+  _TAG: manual
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -22,12 +27,12 @@ steps:
     args:
       - build
       - --file=services/${_SERVICE}/Dockerfile
-      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:$SHORT_SHA
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:${_TAG}
       - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:latest
       - .
 
 images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:${_TAG}
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:latest
 
 options:

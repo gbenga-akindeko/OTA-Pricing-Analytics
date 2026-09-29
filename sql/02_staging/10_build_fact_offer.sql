@@ -18,6 +18,7 @@ SELECT
   r.collected_at,
   TIMESTAMP_TRUNC(r.collected_at, HOUR)                       AS collection_window,
   CONCAT(r.request_origin, '-', r.request_destination)        AS route_key,
+  dr.region_pair                                              AS region_pair,
   r.request_origin                                            AS origin,
   r.request_destination                                       AS destination,
   r.request_departure_date                                    AS departure_date,
@@ -50,6 +51,10 @@ SELECT
   ARRAY_LENGTH(COALESCE(r.segments, [])) AS segment_count,
   r.parse_warnings
 FROM `${PROJECT}.tvd_fareiq_raw.offer_snapshot` r
+-- region_pair is carried here because BigQuery rejects a correlated
+-- subquery inside the fee catalogue join predicate further down.
+LEFT JOIN `${PROJECT}.tvd_fareiq_mart.dim_route` dr
+  ON dr.route_key = CONCAT(r.request_origin, '-', r.request_destination)
 WHERE r.collected_at >= @window_start
   AND r.collected_at <  @window_end
   AND r.displayed_total IS NOT NULL
@@ -97,7 +102,7 @@ catalogue AS (
    AND (
         f.route_scope = 'GLOBAL'
      OR f.route_scope = CONCAT('ROUTE:', c.route_key)
-     OR f.route_scope = CONCAT('REGION:', (SELECT region_pair FROM `${PROJECT}.tvd_fareiq_mart.dim_route` dr WHERE dr.route_key = c.route_key))
+     OR f.route_scope = CONCAT('REGION:', c.region_pair)
    )
   -- Do not charge for a bag the fare already includes.
   WHERE NOT (f.fee_type = 'BAG_1ST' AND c.included_checked_bags >= 1)
@@ -231,7 +236,9 @@ USING (
     c.legal_basis,
     ARRAY(
       SELECT flag FROM UNNEST([
-        IF(fx.rate IS NULL, 'BLOCKING_NO_FX_RATE', NULL),
+        -- An offer already quoted in the base currency needs no rate. Without
+        -- this, every NGN offer on a day with no NGN->NGN row was blocked.
+        IF(fx.rate IS NULL AND c.quote_currency != base_ccy, 'BLOCKING_NO_FX_RATE', NULL),
         IF(c.marketing_carrier IS NULL, 'WARN_NO_CARRIER', NULL),
         IF(ARRAY_LENGTH(COALESCE(c.parse_warnings, [])) > 0, 'WARN_PARSE', NULL),
         IF(c.displayed_total > ${OUTLIER_ABS_CEILING}, 'BLOCKING_PRICE_OUTLIER_HIGH', NULL),
