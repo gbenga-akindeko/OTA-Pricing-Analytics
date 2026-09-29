@@ -41,6 +41,9 @@ body{
   -webkit-font-smoothing:antialiased;
 }
 :focus-visible{outline:2px solid var(--green); outline-offset:2px; border-radius:3px}
+/* The hidden attribute must win over any display rule below (.scrim sets
+   display:flex, which otherwise kept the decision dialog open on load). */
+[hidden]{display:none !important}
 
 /* ---------------------------------------------------------- top bar */
 .topbar{
@@ -48,14 +51,11 @@ body{
   background:var(--navy); color:#fff; padding:0 20px; height:56px;
   position:sticky; top:0; z-index:40;
 }
-.brand{display:flex; align-items:baseline; gap:9px; flex:none}
-.brand .mark{
-  width:16px; height:16px; border-radius:50% 50% 50% 4px;
-  background:linear-gradient(135deg,var(--green) 45%,var(--orange) 45%);
-  transform:translateY(2px); display:inline-block;
-}
-.wordmark{font-family:var(--f-ui); font-size:19px; letter-spacing:-.3px; font-weight:300}
-.wordmark em{font-style:normal; color:var(--orange); font-weight:500}
+.brand{display:flex; align-items:center; gap:9px; flex:none}
+/* The logo sits on white, as the brand lockup is drawn for a light ground. */
+.logo-pill{display:flex; align-items:center; background:#fff; border-radius:6px;
+  padding:4px 10px; height:40px}
+.logo-pill .logo{height:32px; width:auto; display:block}
 .product{
   font-family:var(--f-ui); font-size:10px; letter-spacing:1.6px; text-transform:uppercase;
   color:var(--sky); padding-left:9px; margin-left:3px; border-left:1px solid rgba(255,255,255,.22);
