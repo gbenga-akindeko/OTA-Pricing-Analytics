@@ -1,0 +1,1006 @@
+<script>
+/* TVD OTA FareIQ dashboard :: client
+ *
+ * Rendering rules held to throughout, because a pricing dashboard that
+ * misleads is worse than none:
+ *   - One y-axis per chart. Never two scales in one frame. Price and volume
+ *     are two charts sharing a date axis, not one dual-axis chart.
+ *   - Series colours are assigned in fixed order from SERIES and follow the
+ *     entity, so filtering out a competitor never repaints the survivors.
+ *   - A legend whenever there are two or more series.
+ *   - Every chart is backed by a table on the same page, which is also the
+ *     relief for the one palette slot that sits under 3:1 on white.
+ */
+'use strict';
+
+const BOOT = window.BOOT;
+const SERIES = ['#15618F', '#F58220', '#0F7A4C', '#2E9BD4', '#9C2B22'];
+const CHART_TEXT = '#5E7079';
+const GRID = '#DCE5E1';
+const CCY = BOOT.currency || '₦';
+
+let chartsReady = false;
+const colourOf = {};        // entity -> colour, assigned once and kept
+let colourCursor = 0;
+
+google.charts.load('current', { packages: ['corechart', 'bar'] });
+google.charts.setOnLoadCallback(function () { chartsReady = true; boot(); });
+
+/* ================================================================= boot */
+function boot() {
+  document.getElementById('whoami').textContent = BOOT.user + ' · ' + BOOT.role;
+  if (BOOT.sheetUrl) {
+    document.getElementById('sheetlink').innerHTML =
+      '<a href="' + BOOT.sheetUrl + '" target="_blank" rel="noopener">Pricing rules sheet</a>';
+  }
+  buildTabs();
+  loadFreshness();
+  go(BOOT.page);
+  window.addEventListener('resize', debounce(function () { redrawCharts(); }, 220));
+}
+
+function buildTabs() {
+  const el = document.getElementById('tabs');
+  el.innerHTML = '';
+  BOOT.pages.forEach(function (p) {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.type = 'button';
+    b.textContent = p.label;
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', 'false');
+    b.dataset.page = p.id;
+    b.onclick = function () { go(p.id); };
+    el.appendChild(b);
+  });
+}
+
+const PAGE_RENDERERS = {
+  exec: pageExec, review: pageReview, competitor: pageCompetitor,
+  fees: pageFees, route: pageRoute, audit: pageAudit,
+};
+
+let currentPage = null;
+const drawQueue = [];
+
+function go(page) {
+  if (!PAGE_RENDERERS[page]) page = BOOT.pages[0].id;
+  currentPage = page;
+  drawQueue.length = 0;
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
+    t.setAttribute('aria-selected', String(t.dataset.page === page));
+  });
+  setView('<div class="loading"><span class="spinner"></span> Loading…</div>');
+  PAGE_RENDERERS[page]();
+}
+
+function setView(html) { document.getElementById('view').innerHTML = html; }
+
+/* ================================================================= server */
+function api(name, args) {
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(function (e) { reject(new Error(e.message || String(e))); })
+      .apiFetch(name, args || {});
+  });
+}
+
+function rowsOf(res) {
+  if (!res || !res.columns) return [];
+  const names = res.columns.map(function (c) { return c.name; });
+  return (res.rows || []).map(function (r) {
+    const o = {};
+    names.forEach(function (n, i) { o[n] = r[i]; });
+    return o;
+  });
+}
+
+function banner(msg, kind) {
+  const el = document.getElementById('banner');
+  if (!msg) { el.hidden = true; return; }
+  el.className = 'banner' + (kind ? ' ' + kind : '');
+  el.textContent = msg;
+  el.hidden = false;
+  if (kind === 'ok') setTimeout(function () { el.hidden = true; }, 6000);
+}
+
+function fail(err) {
+  setView('<div class="panel"><h2>Could not load</h2><p class="sub">' +
+          esc(err.message) + '</p><p class="note">If this mentions a missing ' +
+          'table, the morning pipeline has not run yet today.</p></div>');
+}
+
+function loadFreshness() {
+  api('freshness').then(function (res) {
+    const r = rowsOf(res)[0];
+    const el = document.getElementById('freshness');
+    if (!r || r.minutes_ago === null) { el.textContent = 'no data yet'; el.classList.add('stale'); return; }
+    const mins = r.minutes_ago;
+    const label = mins < 90 ? mins + ' min ago' : Math.round(mins / 60) + ' h ago';
+    el.textContent = 'collected ' + label + ' · coverage ' + fmtNum(r.avg_coverage, 2);
+    el.classList.toggle('stale', mins > 180);
+    if (mins > 180) {
+      banner('Market data is ' + Math.round(mins / 60) + ' hours old. Recommendations on this ' +
+             'screen were computed from it, so treat them as indicative until the next sweep lands.');
+    }
+  }).catch(function () { /* the banner is a nicety, never a blocker */ });
+}
+
+/* ================================================================= page 1 */
+function pageExec() {
+  Promise.all([api('exec_overview'), api('index_trend', { days: 90 })])
+    .then(function (r) {
+      const o = rowsOf(r[0])[0] || {};
+      const trend = rowsOf(r[1]);
+
+      const tiles = [
+        ['Routes monitored', fmtInt(o.routes_monitored), '', ''],
+        ['Airlines', fmtInt(o.airlines_monitored), '', ''],
+        ['Competitors tracked', fmtInt(o.competitors_tracked), '', ''],
+        ['Average price index', fmtNum(o.avg_price_index, 3),
+         indexClass(o.avg_price_index), bandNote(o.avg_price_index)],
+        ['Cells where we are cheapest', fmtInt(o.cells_where_we_are_cheapest), '',
+         pct(o.share_top3) + ' of cells in the top three'],
+        ['P1 actions today', fmtInt(o.p1_actions), o.p1_actions > 10 ? 'crit' : '', ''],
+        ['Margin upside identified', money(o.margin_upside_base_ccy), 'accent', 'if every recommendation were approved'],
+        ['Panel coverage', fmtNum(o.avg_coverage, 2), o.avg_coverage < 0.7 ? 'crit' : 'good',
+         o.avg_coverage < 0.7 ? 'below 0.7: treat the index with caution' : 'healthy'],
+      ];
+
+      setView(
+        head('Executive overview',
+             'Where we sit against the market today, on true customer cost rather than advertised fare.') +
+        '<div class="tiles">' + tiles.map(tile).join('') + '</div>' +
+        '<div class="grid g2">' +
+          panel('Price index against the market', 'By region, 90 days. 1.00 is at market; the healthy band is 0.97 to 1.03.',
+                '<div id="ch-trend" class="chart tall"></div>' +
+                '<p class="note">Above the band we are dearer than the market median on true ' +
+                'customer cost, below it we are cheaper and may have margin to take back.</p>') +
+          panel('Coverage', 'How many competitors we actually observed, by day. Everything above depends on this.',
+                '<div id="ch-cov" class="chart tall"></div>' +
+                '<p class="note">Below 0.7 the market median is built on too thin a panel, and the ' +
+                'engine will decline to act rather than guess.</p>') +
+        '</div>' +
+        tablePanel('Index by region, latest day', trendTable(trend))
+      );
+
+      const byRegion = pivot(trend, 'snapshot_date', 'region_pair', 'price_index');
+      queueChart('ch-trend', function () {
+        drawLine('ch-trend', byRegion, {
+          vTitle: 'Price index', vFormat: '#,##0.00',
+          baseline: 1.0, vMin: 0.8, vMax: 1.25,
+        });
+      });
+      const cov = pivot(trend, 'snapshot_date', 'region_pair', 'coverage');
+      queueChart('ch-cov', function () {
+        drawLine('ch-cov', cov, { vTitle: 'Coverage', vFormat: '#,##0.0', vMin: 0, vMax: 1 });
+      });
+      runQueue();
+    }).catch(fail);
+}
+
+function trendTable(trend) {
+  if (!trend.length) return emptyTable('No snapshots yet today.');
+  const last = trend[trend.length - 1].snapshot_date;
+  const rows = trend.filter(function (t) { return t.snapshot_date === last; });
+  return table(
+    ['Region', 'Price index', 'Coverage', 'Position'],
+    rows.map(function (r) {
+      return [
+        td(r.region_pair || 'Unclassified', 'route'),
+        td(fmtNum(r.price_index, 3), 'num'),
+        td(fmtNum(r.coverage, 2), 'num'),
+        td(chip(bandLabel(r.price_index), indexChipClass(r.price_index))),
+      ];
+    }), [2, 3]);
+}
+
+/* ================================================================= page 2 */
+let reviewRows = [];
+const selected = new Set();
+
+function pageReview() {
+  const f = readReviewFilters();
+  setView(
+    head('Daily pricing review',
+         'Ranked by expected margin impact, not by price gap. The biggest gap is rarely the biggest opportunity.') +
+    reviewControls(f) +
+    '<div id="reviewbody"><div class="loading"><span class="spinner"></span> Loading recommendations…</div></div>'
+  );
+  bindReviewControls();
+  loadReview();
+}
+
+function readReviewFilters() {
+  return {
+    reviewDate: (document.getElementById('f-date') || {}).value || BOOT.today,
+    priority: val('f-priority'), classification: val('f-class'),
+    action: val('f-action'), status: val('f-status') || 'PENDING',
+    minConfidence: val('f-conf'),
+    actionableOnly: (document.getElementById('f-actionable') || {}).checked,
+  };
+}
+function val(id) { const e = document.getElementById(id); return e ? e.value : ''; }
+
+function reviewControls(f) {
+  return '<div class="controls">' +
+    ctl('Review date', '<input type="date" id="f-date" value="' + esc(f.reviewDate) + '">') +
+    ctl('Priority', sel('f-priority', ['', 'P1', 'P2', 'P3'], f.priority, 'All')) +
+    ctl('Classification', sel('f-class',
+        ['', 'COMPETITIVE', 'WATCH', 'UNCOMPETITIVE', 'MARGIN_OPPORTUNITY', 'PROTECTED'],
+        f.classification, 'All')) +
+    ctl('Action', sel('f-action', ['', 'DECREASE', 'INCREASE', 'HOLD', 'ESCALATE', 'INVESTIGATE'], f.action, 'All')) +
+    ctl('Status', sel('f-status', ['PENDING', 'APPROVED', 'MODIFIED', 'REJECTED', ''], f.status, 'Any')) +
+    ctl('Min confidence', sel('f-conf', ['', '0.5', '0.65', '0.8'], f.minConfidence, 'Any')) +
+    '<div class="spacer"></div>' +
+    '<button class="btn ghost" id="btn-reload" type="button">Refresh</button>' +
+    '<button class="btn primary" id="btn-bulk" type="button" disabled>Approve selected</button>' +
+    '</div>';
+}
+
+function bindReviewControls() {
+  ['f-date', 'f-priority', 'f-class', 'f-action', 'f-status', 'f-conf'].forEach(function (id) {
+    const e = document.getElementById(id);
+    if (e) e.onchange = loadReview;
+  });
+  document.getElementById('btn-reload').onclick = loadReview;
+  document.getElementById('btn-bulk').onclick = bulkApprove;
+}
+
+function loadReview() {
+  selected.clear();
+  updateBulkButton();
+  document.getElementById('reviewbody').innerHTML =
+    '<div class="loading"><span class="spinner"></span> Loading recommendations…</div>';
+  api('review', { filters: readReviewFilters() }).then(function (res) {
+    reviewRows = rowsOf(res);
+    renderReview();
+  }).catch(function (e) {
+    document.getElementById('reviewbody').innerHTML =
+      '<div class="panel"><h2>Could not load</h2><p class="sub">' + esc(e.message) + '</p></div>';
+  });
+}
+
+function renderReview() {
+  if (!reviewRows.length) {
+    document.getElementById('reviewbody').innerHTML =
+      '<div class="panel"><div class="empty">Nothing matches these filters. ' +
+      'On a quiet day that is the correct answer, not a fault.</div></div>';
+    return;
+  }
+
+  const acts = reviewRows.filter(function (r) { return r.action !== 'HOLD'; });
+  const upside = sum(acts.map(function (r) { return Math.max(r.expected_margin_impact || 0, 0); }));
+  const p1 = reviewRows.filter(function (r) { return r.priority === 'P1'; }).length;
+
+  const summary = '<div class="tiles">' +
+    tile(['Recommendations', fmtInt(reviewRows.length), '', 'matching the filters']) +
+    tile(['Needing action', fmtInt(acts.length), 'accent', fmtInt(reviewRows.length - acts.length) + ' hold']) +
+    tile(['P1', fmtInt(p1), p1 > 10 ? 'crit' : '', 'highest value, highest confidence']) +
+    tile(['Margin upside', money(upside), 'good', 'if all were approved']) +
+    '</div>';
+
+  const canAct = BOOT.role === 'analyst' || BOOT.role === 'lead';
+  const head = ['', 'Route', 'Carrier', 'Departure', 'DTD', 'Our price', 'True cost',
+                'Cheapest', 'Comp. price', 'Gap %', 'Index', 'Rank', 'Panel',
+                'Margin %', 'Floor', 'Recommended', 'Change', 'Class', 'Action',
+                'Conf.', 'Margin impact'];
+  if (canAct) head.push('Decision');
+
+  const body = reviewRows.map(function (r, i) {
+    const cells = [
+      td(canAct && r.status === 'PENDING' && r.action !== 'HOLD'
+         ? '<input type="checkbox" class="rowsel" data-i="' + i + '" aria-label="Select ' + esc(r.route_key) + '">'
+         : ''),
+      td(esc(r.route_key), 'route'),
+      td(esc(r.marketing_carrier || '—')),
+      td(esc(r.departure_date || '')),
+      td(fmtInt(r.days_to_departure), 'num'),
+      td(money(r.our_price), 'num'),
+      td(money(r.our_true_customer_cost), 'num'),
+      td(esc(r.cheapest_competitor || '—')),
+      td(money(r.cheapest_competitor_price), 'num'),
+      td(signed(r.price_gap_pct, 1) + '%', 'num'),
+      td(fmtNum(r.price_index, 3), 'num'),
+      td(r.our_market_rank === 1 ? '<b>1</b>' : fmtInt(r.our_market_rank), 'num'),
+      td(panelCell(r.panel_size), 'num'),
+      td(fmtNum(r.current_margin_pct, 1) + '%', 'num'),
+      td(money(r.minimum_price), 'num'),
+      td('<b>' + money(r.recommended_price) + '</b>', 'num'),
+      td(r.action === 'HOLD' ? '—' : signed(r.price_change_pct, 1) + '%', 'num'),
+      td(chip(shortClass(r.classification), classChip(r.classification))),
+      td(esc(r.action)),
+      td(fmtNum(r.confidence, 2) + bar(r.confidence, 1), 'num'),
+      td(money(r.expected_margin_impact), 'num'),
+    ];
+    if (canAct) cells.push(td(decisionCell(r, i)));
+    return cells;
+  });
+
+  document.getElementById('reviewbody').innerHTML =
+    summary +
+    '<div class="tablewrap">' + tableRaw(head, body, numericCols(head)) + '</div>' +
+    '<div class="panel" style="margin-top:14px">' +
+      '<h2>Why these recommendations exist</h2>' +
+      '<p class="sub">The engine states its reasoning in words. If a line does not convince you, reject it and say why: ' +
+      'consistent overrides mean the rules are wrong, not that you are.</p>' +
+      reviewRows.slice(0, 8).map(function (r) {
+        return '<p class="rationale"><b>' + esc(r.route_key) + ' ' + esc(r.departure_date) + '</b> — ' +
+               esc(r.rationale || 'No rationale recorded.') + '</p>';
+      }).join('') +
+    '</div>';
+
+  bindRowHandlers();
+}
+
+function decisionCell(r, i) {
+  if (r.status && r.status !== 'PENDING') return chip(r.status, statusChip(r.status));
+  if (r.action === 'HOLD') return '<span class="chip c-neutral">NO CHANGE</span>';
+  return '<span class="rowbtns">' +
+    '<button class="btn primary sm" data-act="APPROVED" data-i="' + i + '">Approve</button>' +
+    '<button class="btn ghost sm" data-act="MODIFIED" data-i="' + i + '">Modify</button>' +
+    '<button class="btn danger sm" data-act="REJECTED" data-i="' + i + '">Reject</button>' +
+    '</span>';
+}
+
+function bindRowHandlers() {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-act]'), function (b) {
+    b.onclick = function () { openDecision(Number(b.dataset.i), b.dataset.act); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.rowsel'), function (c) {
+    c.onchange = function () {
+      const i = Number(c.dataset.i);
+      if (c.checked) selected.add(i); else selected.delete(i);
+      c.closest('tr').classList.toggle('sel', c.checked);
+      updateBulkButton();
+    };
+  });
+}
+
+function updateBulkButton() {
+  const b = document.getElementById('btn-bulk');
+  if (!b) return;
+  b.disabled = selected.size === 0;
+  b.textContent = selected.size ? 'Approve ' + selected.size + ' selected' : 'Approve selected';
+}
+
+/* ------------------------------------------------- decisions */
+let pending = null;
+
+function openDecision(i, decision) {
+  const r = reviewRows[i];
+  pending = { row: r, decision: decision };
+
+  const needsReason = decision === 'MODIFIED' || decision === 'REJECTED';
+  const needsPrice = decision === 'MODIFIED';
+
+  document.getElementById('modal-title').textContent =
+    ({ APPROVED: 'Approve recommendation', MODIFIED: 'Modify price', REJECTED: 'Reject recommendation' })[decision];
+  document.getElementById('modal-sub').innerHTML =
+    esc(r.route_key) + ' · ' + esc(r.departure_date) + ' · ' + esc(r.cabin) + '<br>' +
+    'Current ' + money(r.our_price) + ' → recommended <b>' + money(r.recommended_price) + '</b> ' +
+    '(' + signed(r.price_change_pct, 1) + '%). Cheapest comparable ' + money(r.cheapest_competitor_price) + '.';
+
+  document.getElementById('price-field').hidden = !needsPrice;
+  document.getElementById('modal-price').value = needsPrice ? Math.round(r.recommended_price) : '';
+  document.getElementById('price-hint').textContent =
+    'Policy floor is ' + money(r.minimum_price) + '. The pricing service will refuse anything below it.';
+  document.getElementById('reason-req').textContent = needsReason ? '(required)' : '(optional)';
+  document.getElementById('modal-reason').value = '';
+
+  document.getElementById('scrim').hidden = false;
+  (needsPrice ? document.getElementById('modal-price') : document.getElementById('modal-reason')).focus();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('modal-cancel').onclick = closeModal;
+  document.getElementById('modal-ok').onclick = submitModal;
+  document.getElementById('scrim').addEventListener('click', function (e) {
+    if (e.target.id === 'scrim') closeModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !document.getElementById('scrim').hidden) closeModal();
+  });
+});
+
+function closeModal() { document.getElementById('scrim').hidden = true; pending = null; }
+
+function submitModal() {
+  if (!pending) return;
+  const reason = document.getElementById('modal-reason').value.trim();
+  const price = Number(document.getElementById('modal-price').value);
+  const needsReason = pending.decision === 'MODIFIED' || pending.decision === 'REJECTED';
+
+  if (needsReason && reason.length < 4) {
+    banner('A reason is required to ' + pending.decision.toLowerCase() + '. One sentence is enough.', 'err');
+    return;
+  }
+  if (pending.decision === 'MODIFIED') {
+    if (!isFinite(price) || price <= 0) { banner('Enter a valid approved price.', 'err'); return; }
+    if (price < pending.row.minimum_price) {
+      banner('That price is below the policy floor of ' + money(pending.row.minimum_price) +
+             '. Change the rule in the pricing config sheet if the floor is wrong.', 'err');
+      return;
+    }
+  }
+
+  const ok = document.getElementById('modal-ok');
+  ok.disabled = true; ok.textContent = 'Submitting…';
+
+  google.script.run
+    .withSuccessHandler(function (res) {
+      ok.disabled = false; ok.textContent = 'Submit';
+      closeModal();
+      if (res.ok) { banner('Decision recorded in the audit trail.', 'ok'); loadReview(); }
+      else banner(res.message || 'The pricing service refused this decision.', 'err');
+    })
+    .withFailureHandler(function (e) {
+      ok.disabled = false; ok.textContent = 'Submit';
+      banner(e.message || 'Could not reach the pricing service.', 'err');
+    })
+    .submitDecision({
+      recommendationId: pending.row.recommendation_id,
+      decision: pending.decision,
+      approvedPrice: pending.decision === 'MODIFIED' ? price : null,
+      overrideReason: reason || null,
+    });
+}
+
+function bulkApprove() {
+  const items = Array.from(selected).map(function (i) {
+    return { recommendationId: reviewRows[i].recommendation_id, decision: 'APPROVED' };
+  });
+  if (!items.length) return;
+  if (!window.confirm('Approve ' + items.length + ' recommendations at the price the engine recommended?')) return;
+
+  const b = document.getElementById('btn-bulk');
+  b.disabled = true; b.textContent = 'Submitting…';
+  google.script.run
+    .withSuccessHandler(function (res) {
+      if (res.ok) banner(res.submitted + ' decisions recorded.', 'ok');
+      else banner(res.submitted + ' recorded, ' + res.failures.length + ' refused: ' +
+                  res.failures.slice(0, 3).map(function (f) { return f.message; }).join(' | '), 'err');
+      loadReview();
+    })
+    .withFailureHandler(function (e) { b.disabled = false; banner(e.message, 'err'); })
+    .submitDecisionBatch(items);
+}
+
+/* ================================================================= page 3 */
+function pageCompetitor() {
+  Promise.all([api('competitors', { days: 30 }), api('competitor_series', { days: 45 }),
+               api('movements'), api('mining')])
+    .then(function (r) {
+      const rank = rowsOf(r[0]);
+      const series = rowsOf(r[1]);
+      const moves = rowsOf(r[2]);
+      const signals = rowsOf(r[3]).filter(function (s) { return s.signal_type === 'COMPETITOR_ANOMALY'; });
+
+      setView(
+        head('Competitor intelligence',
+             'Who is genuinely cheapest on true customer cost, how often, and whose strategy is shifting.') +
+        '<div class="grid g2">' +
+          panel('Cheapest win rate', 'Share of market cells where each seller was the cheapest comparable offer, 45 days.',
+                '<div id="ch-win" class="chart tall"></div>' +
+                '<p class="note">A competitor whose line is climbing is changing strategy. That is worth ' +
+                'knowing before it shows up in our conversion rate.</p>') +
+          panel('Median price by competitor', 'Last 30 days, all monitored cells.',
+                '<div id="ch-median" class="chart tall"></div>') +
+        '</div>' +
+        tablePanel('Competitor ranking, 30 days',
+          table(['Competitor', 'Cells', 'Times cheapest', 'Win rate', 'Avg rank', 'Median price'],
+            rank.map(function (c) {
+              return [td(esc(c.seller_name || c.seller_id), 'route'), td(fmtInt(c.cells), 'num'),
+                      td(fmtInt(c.wins), 'num'), td(pct(c.win_rate) + bar(c.win_rate, 1), 'num'),
+                      td(fmtNum(c.avg_rank, 2), 'num'), td(money(c.median_price), 'num')];
+            }), [1, 2, 3, 4, 5])) +
+        tablePanel('Major price movements, last 7 days',
+          moves.length ? table(['Date', 'Competitor', 'Route', 'Was', 'Now', 'Change', 'Band'],
+            moves.map(function (m) {
+              return [td(esc(m.obs_date)), td(esc(m.seller_id)), td(esc(m.route_key), 'route'),
+                      td(money(m.prev_median_price), 'num'), td(money(m.median_price), 'num'),
+                      td(signed(m.change_pct, 1) + '%', 'num'),
+                      td(chip(m.movement_band, m.movement_band === 'MAJOR' ? 'c-crit' : 'c-warn'))];
+            }), [3, 4, 5]) : emptyTable('No notable movements. A quiet market is a real finding.')) +
+        (signals.length ? tablePanel('Anomalies flagged by the mining job',
+          table(['Date', 'Severity', 'Competitor', 'Route', 'Metric', 'Observed', 'Expected', 'Deviation'],
+            signals.map(function (s) {
+              return [td(esc(s.signal_date)), td(chip(s.severity, sevChip(s.severity))),
+                      td(esc(s.seller_id || '—')), td(esc(s.route_key || '—'), 'route'),
+                      td(esc(s.metric)), td(money(s.observed_value), 'num'),
+                      td(money(s.expected_value), 'num'), td(fmtNum(s.deviation_score, 1) + 'σ', 'num')];
+            }), [5, 6, 7])) : '')
+      );
+
+      const winPivot = pivot(series, 'obs_date', 'seller_id', 'win_rate');
+      queueChart('ch-win', function () {
+        drawLine('ch-win', winPivot, { vTitle: 'Win rate', vFormat: '#,##0%', vMin: 0 });
+      });
+      queueChart('ch-median', function () {
+        drawBars('ch-median',
+          rank.map(function (c) { return [c.seller_name || c.seller_id, c.median_price]; }),
+          { vTitle: 'Median comparable price', series: 0 });
+      });
+      runQueue();
+    }).catch(fail);
+}
+
+/* ================================================================= page 4 */
+function pageFees() {
+  Promise.all([api('fee_matrix'), api('fee_changes', { days: 60 })])
+    .then(function (r) {
+      const fees = rowsOf(r[0]);
+      const changes = rowsOf(r[1]);
+      const carriers = unique(fees.map(function (f) { return f.carrier; }));
+      const types = unique(fees.map(function (f) { return f.fee_type; }));
+
+      const matrix = '<div class="tablewrap">' + tableRaw(
+        ['Carrier'].concat(types),
+        carriers.map(function (c) {
+          const name = (fees.filter(function (f) { return f.carrier === c; })[0] || {}).carrier_name;
+          return [td(esc(name || c), 'route')].concat(types.map(function (t) {
+            const hit = fees.filter(function (f) { return f.carrier === c && f.fee_type === t; })[0];
+            return td(hit ? money(hit.amount) : '—', 'num');
+          }));
+        }),
+        types.map(function (_, i) { return i + 1; })) + '</div>';
+
+      setView(
+        head('Airline fee intelligence',
+             'The ancillary load behind every headline fare. This is what turns an advertised price into what the customer pays.') +
+        '<div class="grid g2">' +
+          panel('Ancillary load by carrier', 'Total current baggage, seat and payment fees, one bar per carrier.',
+                '<div id="ch-fees" class="chart"></div>' +
+                '<p class="note">The chart that explains why a low cost carrier’s headline fare is ' +
+                'not the bargain it looks like.</p>') +
+          panel('Fee changes', 'Movements in the last 60 days, by size.',
+                '<div id="ch-feechg" class="chart"></div>') +
+        '</div>' +
+        '<div class="panel" style="margin-top:14px"><h2>Current fee matrix</h2>' +
+          '<p class="sub">Carriers down, fee types across. Built to be printed: this becomes the reference the whole commercial team uses.</p>' +
+          matrix + '</div>' +
+        tablePanel('Fee change log',
+          changes.length ? table(['Date', 'Carrier', 'Fee', 'POS', 'Was', 'Now', 'Change', 'Impact'],
+            changes.map(function (c) {
+              return [td(esc(c.change_date)), td(esc(c.carrier), 'route'), td(esc(c.fee_type)),
+                      td(esc(c.pos_country || '—')), td(money(c.previous_amount), 'num'),
+                      td(money(c.new_amount), 'num'), td(signed(c.change_pct, 1) + '%', 'num'),
+                      td(chip(c.impact_band, c.impact_band === 'MAJOR' ? 'c-crit' :
+                                             c.impact_band === 'NOTABLE' ? 'c-warn' : 'c-neutral'))];
+            }), [4, 5, 6]) : emptyTable('No fee changes recorded in the window.'))
+      );
+
+      const load = carriers.map(function (c) {
+        const total = sum(fees.filter(function (f) { return f.carrier === c; })
+                              .map(function (f) { return f.amount || 0; }));
+        return [c, total];
+      }).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 12);
+
+      queueChart('ch-fees', function () {
+        drawBars('ch-fees', load, { vTitle: 'Total ancillary load', series: 1 });
+      });
+      queueChart('ch-feechg', function () {
+        drawBars('ch-feechg',
+          changes.slice(0, 12).map(function (c) {
+            return [c.carrier + ' ' + c.fee_type, c.change_delta || 0];
+          }),
+          { vTitle: 'Change in fee', diverging: true });
+      });
+      runQueue();
+    }).catch(fail);
+}
+
+/* ================================================================= page 5 */
+let routeList = [];
+
+function pageRoute() {
+  api('route_list').then(function (res) {
+    routeList = rowsOf(res);
+    const first = (routeList[0] || {}).route_key;
+    setView(
+      head('Route analysis', 'Price, demand and margin for one route, on a shared date axis so a price move can be judged against what it did to volume.') +
+      '<div class="controls">' +
+        ctl('Route', '<select id="f-route">' + routeList.map(function (r) {
+          return '<option value="' + esc(r.route_key) + '">' + esc(r.route_key) + ' · ' +
+                 esc(r.origin_city || '') + ' to ' + esc(r.destination_city || '') + '</option>';
+        }).join('') + '</select>') +
+        ctl('Window', sel('f-window', ['90', '180', '365'], '180', null)) +
+      '</div>' +
+      '<div id="routebody"><div class="loading"><span class="spinner"></span> Loading…</div></div>'
+    );
+    document.getElementById('f-route').onchange = loadRoute;
+    document.getElementById('f-window').onchange = loadRoute;
+    if (first) loadRoute();
+    else document.getElementById('routebody').innerHTML =
+      '<div class="panel"><div class="empty">No monitored routes configured yet.</div></div>';
+  }).catch(fail);
+}
+
+function loadRoute() {
+  const rk = val('f-route');
+  const days = Number(val('f-window')) || 180;
+  document.getElementById('routebody').innerHTML =
+    '<div class="loading"><span class="spinner"></span> Loading ' + esc(rk) + '…</div>';
+
+  Promise.all([api('route', { routeKey: rk, days: days }), api('elasticity', { routeKey: rk })])
+    .then(function (r) {
+      const rows = rowsOf(r[0]);
+      const el = rowsOf(r[1])[0];
+
+      const totalPax = sum(rows.map(function (x) { return x.pax || 0; }));
+      const totalMargin = sum(rows.map(function (x) { return x.margin || 0; }));
+      const totalRev = sum(rows.map(function (x) { return x.revenue || 0; }));
+      const avgIndex = avg(rows.map(function (x) { return x.price_index; }));
+
+      document.getElementById('routebody').innerHTML =
+        '<div class="tiles">' +
+          tile(['Passengers', fmtInt(totalPax), '', 'in the window']) +
+          tile(['Revenue', money(totalRev), '', '']) +
+          tile(['Margin', money(totalMargin), 'good',
+                totalRev ? pct(totalMargin / totalRev) + ' of revenue' : '']) +
+          tile(['Average price index', fmtNum(avgIndex, 3), indexClass(avgIndex), bandNote(avgIndex)]) +
+          tile(['Share elasticity', el ? fmtNum(el.elasticity, 2) : 'not estimated',
+                el && el.elasticity_source === 'ROUTE' ? 'good' : '',
+                el ? el.elasticity_source.toLowerCase().replace('_', ' ') + ', ' + el.weeks + ' weeks of data'
+                   : 'regional prior will be used']) +
+        '</div>' +
+        '<div class="grid g2">' +
+          panel('Price against the market', 'Our comparable cost, the market median and the cheapest competitor.',
+                '<div id="ch-price" class="chart tall"></div>') +
+          panel('Demand', 'Bookings and conversion, same date axis. Two measures, two frames: a single chart with two scales would invite a false reading.',
+                '<div id="ch-demand" class="chart tall"></div>') +
+        '</div>' +
+        '<div class="grid g2" style="margin-top:14px">' +
+          panel('Price index', 'Against the 0.97 to 1.03 healthy band.', '<div id="ch-idx" class="chart"></div>') +
+          panel('Margin', 'Absolute margin by day.', '<div id="ch-margin" class="chart"></div>') +
+        '</div>' +
+        (el ? '<div class="panel" style="margin-top:14px"><h2>How to read the elasticity</h2>' +
+          '<p class="sub">Estimated at <b>' + fmtNum(el.elasticity, 2) + '</b> from <b>' +
+          esc(el.elasticity_source.toLowerCase().replace('_', ' ')) + '</b>, on ' + fmtInt(el.weeks) +
+          ' weeks and ' + fmtInt(el.total_pax) + ' passengers. A cut on this route only pays if ' +
+          'that number is beyond the break-even bar of price divided by margin. The source is shown ' +
+          'deliberately: an estimate built from a regional prior should not look as authoritative as ' +
+          'one built from two years of route history.</p></div>' : '');
+
+      const byDate = rows.reduce(function (m, r) { (m[r.snapshot_date] = m[r.snapshot_date] || []).push(r); return m; }, {});
+      const dates = Object.keys(byDate).sort();
+      const priceSeries = {
+        labels: dates,
+        series: [
+          { name: 'Our comparable cost', values: dates.map(function (d) { return avg(byDate[d].map(function (x) { return x.our_price; })); }) },
+          { name: 'Market median',       values: dates.map(function (d) { return avg(byDate[d].map(function (x) { return x.market_median; })); }) },
+          { name: 'Cheapest competitor', values: dates.map(function (d) { return avg(byDate[d].map(function (x) { return x.cheapest_competitor; })); }) },
+        ],
+      };
+      queueChart('ch-price', function () {
+        drawLine('ch-price', priceSeries, { vTitle: 'Comparable cost', vFormat: 'short' });
+      });
+      queueChart('ch-demand', function () {
+        drawLine('ch-demand', {
+          labels: dates,
+          series: [{ name: 'Bookings', values: dates.map(function (d) { return sum(byDate[d].map(function (x) { return x.bookings || 0; })); }) }],
+        }, { vTitle: 'Bookings', vMin: 0 });
+      });
+      queueChart('ch-idx', function () {
+        drawLine('ch-idx', {
+          labels: dates,
+          series: [{ name: 'Price index', values: dates.map(function (d) { return avg(byDate[d].map(function (x) { return x.price_index; })); }) }],
+        }, { vTitle: 'Index', baseline: 1.0, vMin: 0.8, vMax: 1.25, vFormat: '#,##0.00' });
+      });
+      queueChart('ch-margin', function () {
+        drawBars('ch-margin', dates.slice(-30).map(function (d) {
+          return [d.slice(5), sum(byDate[d].map(function (x) { return x.margin || 0; }))];
+        }), { vTitle: 'Margin', series: 2 });
+      });
+      runQueue();
+    }).catch(function (e) {
+      document.getElementById('routebody').innerHTML =
+        '<div class="panel"><h2>Could not load</h2><p class="sub">' + esc(e.message) + '</p></div>';
+    });
+}
+
+/* ================================================================= page 6 */
+function pageAudit() {
+  Promise.all([api('opportunities'), api('audit', { days: 30 }), api('scorecard')])
+    .then(function (r) {
+      const opps = rowsOf(r[0]);
+      const audit = rowsOf(r[1]);
+      const score = rowsOf(r[2]);
+
+      const approved = audit.filter(function (a) { return a.decision === 'APPROVED'; }).length;
+      const modified = audit.filter(function (a) { return a.decision === 'MODIFIED'; }).length;
+      const rejected = audit.filter(function (a) { return a.decision === 'REJECTED'; }).length;
+      const rate = audit.length ? approved / audit.length : null;
+
+      setView(
+        head('Opportunities and audit',
+             'Where the money is today, and how well the engine’s forecasts have held up. The second half is what earns the platform its trust.') +
+        '<div class="tiles">' +
+          tile(['Open opportunities', fmtInt(opps.length), '', 'awaiting a decision']) +
+          tile(['Value at stake', money(sum(opps.map(function (o) { return o.opportunity_value || 0; }))), 'accent', 'expected margin impact']) +
+          tile(['Acceptance rate', rate === null ? '—' : pct(rate),
+                rate !== null && rate < 0.4 ? 'crit' : '', '30 days, ' + fmtInt(audit.length) + ' decisions']) +
+          tile(['Overridden', fmtInt(modified + rejected), modified + rejected > approved ? 'crit' : '',
+                fmtInt(modified) + ' modified, ' + fmtInt(rejected) + ' rejected']) +
+        '</div>' +
+        '<div class="grid g2">' +
+          panel('Opportunity by classification', 'Total expected margin impact, today.',
+                '<div id="ch-opp" class="chart"></div>') +
+          panel('Engine scorecard', 'Forecast margin impact against what was actually realised at T+7.',
+                '<div id="ch-score" class="chart"></div>' +
+                '<p class="note">If these two lines do not converge over the first quarter, the elasticity ' +
+                'estimates need work and nobody should be trusting the revenue impact column, least of all ' +
+                'in a board pack.</p>') +
+        '</div>' +
+        tablePanel('Ranked opportunities',
+          opps.length ? table(['Route', 'Departure', 'Class', 'Action', 'Current', 'Recommended', 'Floor', 'Change', 'Opportunity', 'Conf.'],
+            opps.slice(0, 60).map(function (o) {
+              return [td(esc(o.route_key), 'route'), td(esc(o.departure_date)),
+                      td(chip(shortClass(o.classification), classChip(o.classification))),
+                      td(esc(o.action)), td(money(o.current_price), 'num'),
+                      td('<b>' + money(o.recommended_price) + '</b>', 'num'),
+                      td(money(o.minimum_price), 'num'), td(signed(o.change_pct, 1) + '%', 'num'),
+                      td(money(o.opportunity_value), 'num'), td(fmtNum(o.confidence, 2), 'num')];
+            }), [4, 5, 6, 7, 8, 9]) : emptyTable('No open opportunities today.')) +
+        tablePanel('Decision audit trail, 30 days',
+          audit.length ? table(['When', 'Who', 'Decision', 'Route', 'Before', 'Recommended', 'Approved', 'Reason', 'Benchmark', 'Applied', 'Actual vs plan'],
+            audit.slice(0, 80).map(function (a) {
+              return [td(esc(String(a.decided_at || '').slice(0, 16).replace('T', ' '))),
+                      td(esc(String(a.decided_by || '').split('@')[0])),
+                      td(chip(a.decision, statusChip(a.decision))),
+                      td(esc(a.route_key || '—'), 'route'),
+                      td(money(a.price_before), 'num'), td(money(a.price_recommended), 'num'),
+                      td(a.price_approved === null ? '—' : money(a.price_approved), 'num'),
+                      td('<span class="rationale">' + esc(a.override_reason || '—') + '</span>'),
+                      td(money(a.benchmark_cheapest) + ' / ' + fmtInt(a.benchmark_panel) + ' sellers', 'num'),
+                      td(esc(a.apply_status || '—')),
+                      td(a.actual_vs_expected_pct === null ? 'pending' : signed(a.actual_vs_expected_pct, 1) + '%', 'num')];
+            }), [4, 5, 6, 8, 10]) : emptyTable('No decisions recorded yet.'))
+      );
+
+      const byClass = {};
+      opps.forEach(function (o) {
+        byClass[o.classification] = (byClass[o.classification] || 0) + (o.opportunity_value || 0);
+      });
+      queueChart('ch-opp', function () {
+        drawBars('ch-opp', Object.keys(byClass).map(function (k) { return [shortClass(k), byClass[k]]; }),
+                 { vTitle: 'Expected margin impact', series: 0 });
+      });
+      queueChart('ch-score', function () {
+        drawLine('ch-score', {
+          labels: score.map(function (s) { return String(s.week).slice(0, 10); }),
+          series: [
+            { name: 'Realised margin, T+7', values: score.map(function (s) { return s.realised_margin_7d; }) },
+            { name: 'Acceptance rate', values: score.map(function (s) { return (s.acceptance_rate || 0) * (max(score.map(function (x) { return x.realised_margin_7d || 0; })) || 1); }) },
+          ],
+        }, { vTitle: 'Margin', vFormat: 'short',
+             note: 'Acceptance rate is rescaled to the margin axis so both fit one scale.' });
+      });
+      runQueue();
+    }).catch(fail);
+}
+
+/* ================================================================= charts */
+function queueChart(id, fn) { drawQueue.push({ id: id, fn: fn }); }
+function runQueue() { drawQueue.forEach(function (c) { try { c.fn(); } catch (e) { chartError(c.id, e); } }); }
+function redrawCharts() { if (chartsReady) runQueue(); }
+function chartError(id, e) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = '<p class="note">Chart unavailable: ' + esc(e.message) +
+    '. The table below carries the same figures.</p>';
+}
+
+function baseOptions(o) {
+  return {
+    backgroundColor: '#FFFFFF',
+    chartArea: { left: 68, right: 18, top: 18, bottom: o.legend === 'none' ? 34 : 54, width: '100%', height: '100%' },
+    fontName: 'Helvetica Neue, Arial, sans-serif',
+    fontSize: 11,
+    legend: o.legend === 'none' ? 'none'
+      : { position: 'bottom', alignment: 'start', textStyle: { color: CHART_TEXT, fontSize: 11 } },
+    tooltip: { textStyle: { fontName: 'Helvetica Neue, Arial, sans-serif', fontSize: 12 }, trigger: 'focus' },
+    hAxis: {
+      textStyle: { color: CHART_TEXT, fontSize: 10 },
+      gridlines: { color: 'transparent' },
+      baselineColor: GRID,
+      slantedText: false, maxTextLines: 1,
+    },
+    vAxis: {
+      title: o.vTitle || '',
+      titleTextStyle: { color: CHART_TEXT, italic: false, fontSize: 11 },
+      textStyle: { color: CHART_TEXT, fontSize: 10 },
+      gridlines: { color: GRID, count: 5 },
+      minorGridlines: { count: 0 },
+      baselineColor: GRID,
+      format: o.vFormat === 'short' ? 'short' : (o.vFormat || undefined),
+      viewWindow: { min: o.vMin, max: o.vMax },
+    },
+  };
+}
+
+function drawLine(id, data, o) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!data.series.length || !data.labels.length) {
+    el.innerHTML = '<p class="note">No data for this window.</p>';
+    return;
+  }
+  const dt = new google.visualization.DataTable();
+  dt.addColumn('string', 'x');
+  data.series.forEach(function (s) { dt.addColumn('number', s.name); });
+  if (o.baseline !== undefined) dt.addColumn('number', 'At market');
+
+  data.labels.forEach(function (lab, i) {
+    const row = [String(lab).slice(5)];
+    data.series.forEach(function (s) { row.push(numOrNull(s.values[i])); });
+    if (o.baseline !== undefined) row.push(o.baseline);
+    dt.addRow(row);
+  });
+
+  const colours = data.series.map(function (s) { return colourFor(s.name); });
+  if (o.baseline !== undefined) colours.push('#B8C6BF');
+
+  const opts = baseOptions(Object.assign({}, o,
+    { legend: data.series.length > 1 || o.baseline !== undefined ? undefined : 'none' }));
+  opts.colors = colours;
+  opts.lineWidth = 2;
+  opts.pointSize = data.labels.length <= 30 ? 4 : 0;
+  opts.interpolateNulls = true;
+  opts.focusTarget = 'category';
+  opts.crosshair = { trigger: 'both', orientation: 'vertical', color: '#C6D3CC' };
+  if (o.baseline !== undefined) {
+    opts.series = {};
+    opts.series[data.series.length] = { lineWidth: 1, lineDashStyle: [4, 4], pointSize: 0, enableInteractivity: false };
+  }
+
+  new google.visualization.LineChart(el).draw(dt, opts);
+  if (o.note) el.insertAdjacentHTML('afterend', '<p class="note">' + esc(o.note) + '</p>');
+}
+
+function drawBars(id, pairs, o) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!pairs.length) { el.innerHTML = '<p class="note">No data for this window.</p>'; return; }
+
+  const dt = new google.visualization.DataTable();
+  dt.addColumn('string', 'x');
+  dt.addColumn('number', o.vTitle || 'Value');
+  dt.addColumn({ type: 'string', role: 'style' });
+  pairs.forEach(function (p) {
+    const v = numOrNull(p[1]);
+    const colour = o.diverging ? (v < 0 ? SERIES[4] : SERIES[2]) : SERIES[o.series || 0];
+    dt.addRow([String(p[0]), v, 'color: ' + colour + '; stroke-width: 0']);
+  });
+
+  const opts = baseOptions(Object.assign({}, o, { legend: 'none' }));
+  opts.bar = { groupWidth: '62%' };
+  opts.hAxis.slantedText = pairs.length > 6;
+  opts.hAxis.slantedTextAngle = 35;
+  opts.chartArea.bottom = pairs.length > 6 ? 76 : 40;
+  new google.visualization.ColumnChart(el).draw(dt, opts);
+}
+
+/** Colour follows the entity, assigned once. Filtering never repaints survivors. */
+function colourFor(name) {
+  if (!colourOf[name]) {
+    colourOf[name] = SERIES[colourCursor % SERIES.length];
+    colourCursor++;
+  }
+  return colourOf[name];
+}
+
+function pivot(rows, xKey, seriesKey, valueKey) {
+  const labels = unique(rows.map(function (r) { return r[xKey]; })).sort();
+  const names = unique(rows.map(function (r) { return r[seriesKey] || 'Unclassified'; })).sort();
+  const index = {};
+  rows.forEach(function (r) { index[(r[xKey]) + '|' + (r[seriesKey] || 'Unclassified')] = r[valueKey]; });
+  return {
+    labels: labels,
+    series: names.slice(0, 5).map(function (n) {
+      return { name: n, values: labels.map(function (l) { return index[l + '|' + n]; }) };
+    }),
+  };
+}
+
+/* ================================================================= html bits */
+function head(title, sub) {
+  return '<div class="pagehead"><div><h1>' + esc(title) + '</h1><p>' + esc(sub) + '</p></div></div>';
+}
+function panel(title, sub, body) {
+  return '<section class="panel"><h2>' + esc(title) + '</h2>' +
+         (sub ? '<p class="sub">' + esc(sub) + '</p>' : '') + body + '</section>';
+}
+function tablePanel(title, inner) {
+  return '<section class="panel" style="margin-top:14px"><h2>' + esc(title) + '</h2>' + inner + '</section>';
+}
+function tile(t) {
+  return '<div class="tile"><div class="k">' + esc(t[0]) + '</div>' +
+         '<div class="v ' + (t[2] || '') + '">' + t[1] + '</div>' +
+         (t[3] ? '<div class="d">' + esc(t[3]) + '</div>' : '') + '</div>';
+}
+function ctl(label, inner) {
+  return '<div class="ctl"><label>' + esc(label) + '</label>' + inner + '</div>';
+}
+function sel(id, values, current, anyLabel) {
+  return '<select id="' + id + '">' + values.map(function (v) {
+    const label = v === '' ? (anyLabel || 'Any') : v.replace(/_/g, ' ');
+    return '<option value="' + esc(v) + '"' + (String(v) === String(current) ? ' selected' : '') +
+           '>' + esc(label) + '</option>';
+  }).join('') + '</select>';
+}
+function table(headers, bodyRows, numCols) {
+  return '<div class="tablewrap">' + tableRaw(headers, bodyRows, numCols || []) + '</div>';
+}
+function tableRaw(headers, bodyRows, numCols) {
+  const set = new Set(numCols || []);
+  return '<table><thead><tr>' + headers.map(function (h, i) {
+      return '<th' + (set.has(i) ? ' class="num"' : '') + '>' + esc(h) + '</th>';
+    }).join('') + '</tr></thead><tbody>' +
+    bodyRows.map(function (r) { return '<tr>' + r.join('') + '</tr>'; }).join('') +
+    '</tbody></table>';
+}
+function td(inner, cls) { return '<td' + (cls ? ' class="' + cls + '"' : '') + '>' + inner + '</td>'; }
+function emptyTable(msg) { return '<div class="empty">' + esc(msg) + '</div>'; }
+function numericCols(headers) {
+  const numeric = ['DTD', 'Our price', 'True cost', 'Comp. price', 'Gap %', 'Index', 'Rank',
+                   'Panel', 'Margin %', 'Floor', 'Recommended', 'Change', 'Conf.', 'Margin impact'];
+  return headers.map(function (h, i) { return numeric.indexOf(h) >= 0 ? i : -1; })
+                .filter(function (i) { return i >= 0; });
+}
+function chip(label, cls) {
+  return '<span class="chip ' + cls + '">' + esc(String(label || '').replace(/_/g, ' ')) + '</span>';
+}
+function bar(v, maxv) {
+  const w = Math.max(0, Math.min(1, (v || 0) / (maxv || 1))) * 100;
+  return '<span class="databar"><i style="width:' + w.toFixed(0) + '%"></i></span>';
+}
+function panelCell(n) {
+  if (n === null || n === undefined) return '—';
+  return n < 3 ? '<span style="color:var(--mute)" title="Below the three-seller minimum: not actionable">' +
+                 n + '</span>' : String(n);
+}
+
+/* ================================================================= format */
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+function fmtInt(v) { return v === null || v === undefined || isNaN(v) ? '—' : Number(v).toLocaleString('en-NG'); }
+function fmtNum(v, dp) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return Number(v).toLocaleString('en-NG', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+function money(v) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  return CCY + Math.round(Number(v)).toLocaleString('en-NG');
+}
+function pct(v) { return v === null || v === undefined || isNaN(v) ? '—' : (Number(v) * 100).toFixed(1) + '%'; }
+function signed(v, dp) {
+  if (v === null || v === undefined || isNaN(v)) return '—';
+  const n = Number(v);
+  return (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(dp);
+}
+function numOrNull(v) { return v === null || v === undefined || isNaN(v) ? null : Number(v); }
+function sum(a) { return a.reduce(function (x, y) { return x + (Number(y) || 0); }, 0); }
+function avg(a) { const c = a.filter(function (x) { return x !== null && x !== undefined && !isNaN(x); }); return c.length ? sum(c) / c.length : null; }
+function max(a) { return a.reduce(function (x, y) { return Math.max(x, Number(y) || 0); }, 0); }
+function unique(a) { return a.filter(function (v, i, s) { return s.indexOf(v) === i; }); }
+function debounce(fn, ms) { let t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
+
+function shortClass(c) { return c === 'MARGIN_OPPORTUNITY' ? 'MARGIN OPP' : String(c || '').replace(/_/g, ' '); }
+function classChip(c) {
+  return { COMPETITIVE: 'c-good', WATCH: 'c-warn', UNCOMPETITIVE: 'c-crit',
+           MARGIN_OPPORTUNITY: 'c-good', PROTECTED: 'c-neutral' }[c] || 'c-neutral';
+}
+function statusChip(s) {
+  return { APPROVED: 'c-good', MODIFIED: 'c-warn', REJECTED: 'c-crit', DEFERRED: 'c-neutral' }[s] || 'c-neutral';
+}
+function sevChip(s) { return { HIGH: 'c-crit', MEDIUM: 'c-warn', LOW: 'c-neutral' }[s] || 'c-neutral'; }
+function indexClass(v) { return v === null || v === undefined ? '' : (v > 1.08 || v < 0.93 ? 'crit' : v > 1.03 || v < 0.97 ? '' : 'good'); }
+function indexChipClass(v) { return v > 1.08 || v < 0.93 ? 'c-crit' : (v > 1.03 || v < 0.97 ? 'c-warn' : 'c-good'); }
+function bandLabel(v) { return v > 1.03 ? 'Above market' : v < 0.97 ? 'Below market' : 'At market'; }
+function bandNote(v) { return v === null || v === undefined ? '' : bandLabel(v).toLowerCase(); }
+</script>

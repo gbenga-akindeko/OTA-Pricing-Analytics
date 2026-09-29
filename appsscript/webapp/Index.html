@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>TVD OTA FareIQ</title>
+  <?!= include('Styles'); ?>
+</head>
+<body data-palette="#15618F,#F58220,#0F7A4C,#2E9BD4,#9C2B22">
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="wordmark">travel<em>den</em></span>
+    <span class="product">FareIQ</span>
+  </div>
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+  <div class="who">
+    <span id="freshness" class="freshness" title="Age of the newest collection window">checking data…</span>
+    <span id="whoami" class="user"></span>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<main id="view" aria-live="polite">
+  <div class="loading"><span class="spinner" aria-hidden="true"></span> Loading…</div>
+</main>
+
+<footer class="foot">
+  <span>Recommendations are decision support. Nothing changes until a pricing analyst approves it, and every decision is written to the audit trail.</span>
+  <span id="sheetlink"></span>
+</footer>
+
+<!-- Modal used for modify / reject, where a reason is mandatory -->
+<div class="scrim" id="scrim" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h3 id="modal-title">Decision</h3>
+    <p class="modal-sub" id="modal-sub"></p>
+    <label class="field" id="price-field">
+      <span>Approved price</span>
+      <input type="number" id="modal-price" step="100" min="0" inputmode="numeric">
+      <small id="price-hint"></small>
+    </label>
+    <label class="field">
+      <span>Reason <b id="reason-req">(required)</b></span>
+      <textarea id="modal-reason" rows="3" placeholder="Why are you overriding the recommendation?"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button class="btn ghost" id="modal-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="modal-ok" type="button">Submit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.BOOT = <?!= bootstrap ?>;
+</script>
+<script src="https://www.gstatic.com/charts/loader.js"></script>
+<?!= include('Scripts'); ?>
+</body>
+</html>

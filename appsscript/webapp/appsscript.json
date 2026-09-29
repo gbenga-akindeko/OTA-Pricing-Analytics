@@ -1,0 +1,21 @@
+{
+  "timeZone": "Africa/Lagos",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      { "userSymbol": "BigQuery", "serviceId": "bigquery", "version": "v2" }
+    ]
+  },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "DOMAIN"
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/bigquery.readonly",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/admin.directory.group.readonly",
+    "https://www.googleapis.com/auth/script.scriptapp"
+  ]
+}

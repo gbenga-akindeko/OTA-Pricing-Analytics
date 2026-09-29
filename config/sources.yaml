@@ -1,0 +1,220 @@
+# Source register. This file is the compliance control, not documentation.
+# The PermittedPublicCollector reads it at runtime and refuses to run against
+# anything not listed here with a current review.
+#
+# Review cadence: every source, every quarter, by Legal plus the data owner.
+# A source whose review is older than 90 days stops collecting automatically.
+
+base_currency: NGN
+bq_location: europe-west2
+
+sources:
+
+  own_pss:
+    name: Our booking engine
+    tier: OWN
+    legal_basis: OWN_SYSTEM
+    seller_id: us
+    seller_type: US
+    trust_score: 1.00
+    rate_limit_per_minute: 600
+    cost_per_1k_calls_usd: 0.00
+    notes: >
+      The only source that returns supplier cost alongside selling price.
+      Every margin figure in the platform originates here.
+
+  amadeus:
+    name: Amadeus Self-Service Flight Offers Search
+    tier: GDS_NDC
+    legal_basis: CONTRACT_API
+    seller_id: channel_amadeus
+    seller_type: GDS_CHANNEL
+    trust_score: 0.95
+    rate_limit_per_minute: 40
+    cost_per_1k_calls_usd: 25.00
+    contract_reference: AMA-2026-001
+    secret: tvd-ota-fareiq-amadeus
+    secret_shape: '{"client_id": "...", "client_secret": "..."}'
+    caveats:
+      - Broadest schedule coverage of the four. Integrate first.
+      - Baggage is frequently absent, so the fee catalogue fills the gap and
+        fee_confidence drops on those rows.
+
+  sabre:
+    name: Sabre Bargain Finder Max (REST v5)
+    tier: GDS_NDC
+    legal_basis: CONTRACT_API
+    seller_id: channel_sabre
+    seller_type: GDS_CHANNEL
+    trust_score: 0.95
+    rate_limit_per_minute: 30
+    cost_per_1k_calls_usd: 22.00
+    contract_reference: SAB-2026-001
+    secret: tvd-ota-fareiq-sabre
+    secret_shape: '{"client_id": "...", "client_secret": "...", "pcc": "...", "base_url": "https://api.sabre.com"}'
+    caveats:
+      - Auth is OAuth2 client credentials, Basic base64(client_id:client_secret).
+      - Responses are reference-normalised, so schedules and baggage sit in
+        separate lists that the parser resolves. Expect a thinner payload than
+        Amadeus but more of it per call.
+    strengths:
+      - Holds different negotiated fares from Amadeus. On West African routes
+        the gap between the two on the same flight is regularly larger than
+        our markup, which is the whole point of v_channel_arbitrage.
+
+  verteil:
+    name: Verteil (NDC aggregator)
+    tier: GDS_NDC
+    legal_basis: CONTRACT_API
+    seller_id: channel_verteil
+    seller_type: NDC_CHANNEL
+    trust_score: 0.93
+    rate_limit_per_minute: 30
+    cost_per_1k_calls_usd: 0.00
+    contract_reference: VER-2026-001
+    secret: tvd-ota-fareiq-verteil
+    secret_shape: >
+      {"base_url": "...", "shop_path": "/entrygate/rest/request:airShopping",
+       "ndc_version": "17.2", "third_party_id": "...", "username": "...",
+       "password": "...", "corporate_code": "TVD"}
+    strengths:
+      - NDC carries branded fares and priced ancillaries in the same message.
+        This is the single biggest accuracy win available for true customer
+        cost, because it removes the guesswork from the fee catalogue.
+    caveats:
+      - The adapter is built to the IATA NDC AirShopping schema. The endpoint
+        path, version header and auth header vary by onboarding, so all three
+        are read from the secret. Confirm them against the Verteil pack before
+        the first call; no code change should be needed.
+
+  ndc_direct:
+    name: Airline NDC, connected directly
+    tier: GDS_NDC
+    legal_basis: CONTRACT_API
+    seller_id: airline_direct
+    seller_type: AIRLINE_DIRECT
+    trust_score: 0.97
+    rate_limit_per_minute: 20
+    cost_per_1k_calls_usd: 0.00
+    secret: tvd-ota-fareiq-ndc_direct
+    secret_shape: '{"base_url": "...", "default_carrier": "...", "username": "...", "password": "..."}'
+    notes: >
+      The same IATA message shape as Verteil, so it reuses that parser. It
+      earns a separate source id because its commercial meaning is different:
+      a direct NDC price is what the carrier sells to the customer, which for
+      an OTA is the most honest competitor benchmark a supply feed can give.
+      One secret per carrier.
+
+  licensed_market_feed:
+    name: Licensed competitor price feed
+    tier: LICENSED_AGGREGATOR
+    legal_basis: LICENSED_FEED
+    seller_id: multi
+    seller_type: COMPETITOR_OTA
+    trust_score: 0.85
+    rate_limit_per_minute: 120
+    cost_per_1k_calls_usd: 12.00
+    contract_reference: NOT_YET_CONTRACTED
+    enabled: false
+    secret: tvd-ota-fareiq-licensed_market_feed
+    notes: >
+      NOT CONTRACTED. Read this before interpreting any "market median".
+      Amadeus, Sabre, Verteil and direct NDC are all SUPPLY: they tell us what
+      a flight costs us through a channel. None of them tells us what a rival
+      OTA is charging a customer. Until this tier exists, the competitor panel
+      consists of airline-direct NDC prices only, which is a real and useful
+      benchmark but a narrow one. The price index should be read as "against
+      the airline selling direct", not "against the market".
+    licence_terms:
+      redistribution: PROHIBITED
+      retention_days: 400
+      permitted_use: INTERNAL_PRICING_ANALYSIS_ONLY
+
+  permitted_public:
+    name: Permitted public source (template)
+    tier: PERMITTED_PUBLIC
+    legal_basis: PERMITTED_PUBLIC
+    trust_score: 0.60
+    base_url: ""
+    rate_limit_per_minute: 6
+    # Every field below is read at runtime by collectors/scraping.py. The
+    # defaults are the blocked state on purpose: a half-filled entry collects
+    # nothing, and an entry whose legal_review_date passes 90 days stops
+    # collecting without anyone remembering to intervene.
+    enabled: false
+    terms_permit_collection: false
+    robots_allows_path: false
+    legal_review_date: null            # YYYY-MM-DD, set by Legal at review
+    permitted_pos: []
+    contact: data-team@travelden.example
+    guardrails:
+      - Identify the client honestly in the user agent.
+      - Never circumvent an access control, paywall, CAPTCHA or rate limit.
+      - Never collect personal data.
+      - Collect no faster than the published crawl delay, and back off on 429.
+      - Stop immediately if the terms change or a takedown is received.
+      - "Do not use this tier as the sole basis for a price change. It is
+         corroboration, and its trust score reflects that."
+
+# ---------------------------------------------------------------------
+# WHAT COUNTS AS A COMPETITOR
+#
+# Only a price a CUSTOMER could pay elsewhere. Supply channels are excluded
+# from every market statistic; see sql/02_staging/20_build_market_snapshot.sql.
+#
+#   counts:         AIRLINE_DIRECT, COMPETITOR_OTA, METASEARCH
+#   does not count: GDS_CHANNEL (Amadeus, Sabre), NDC_CHANNEL (Verteil), US
+#
+# With today's four sources the panel is airline-direct only, which usually
+# means one or two sellers per cell. The engine requires three before it will
+# act, so most cells will correctly report INVESTIGATE until either the
+# licensed feed is contracted or more carriers are connected via direct NDC.
+competitors:
+  - seller_id: competitor_a
+    name: Competitor A
+    seller_type: COMPETITOR_OTA
+    benchmark_weight: 1.6
+    home_market: NG
+  - seller_id: competitor_b
+    name: Competitor B
+    seller_type: COMPETITOR_OTA
+    benchmark_weight: 1.2
+    home_market: NG
+  - seller_id: competitor_c
+    name: Competitor C (global)
+    seller_type: COMPETITOR_OTA
+    benchmark_weight: 0.7
+    home_market: GB
+    notes: Large but low share locally. Weighted down so it cannot dominate the index.
+  - seller_id: airline_direct
+    name: Airline websites
+    seller_type: AIRLINE_DIRECT
+    benchmark_weight: 1.4
+    notes: >
+      Often the real competitor on African carriers, where direct booking is
+      strong. Excluding airline direct from the panel is the most common way
+      an OTA convinces itself it is cheap.
+
+# ---------------------------------------------------------------------
+monitoring_tiers:
+  T1:
+    description: Revenue concentration routes. Hourly.
+    max_routes: 40
+    horizons: [1, 3, 7, 14, 21, 30, 45, 60, 90]
+    cabins: [ECONOMY, BUSINESS]
+  T2:
+    description: Secondary routes. Every four hours.
+    max_routes: 60
+    horizons: [3, 7, 14, 30, 60, 90]
+    cabins: [ECONOMY]
+  T3:
+    description: Long tail. Daily.
+    max_routes: 200
+    horizons: [7, 30, 60]
+    cabins: [ECONOMY]
+
+# Collection budget guard. The pipeline stops rather than overspend.
+budget:
+  monthly_api_cost_usd_cap: 2500
+  daily_call_cap: 180000
+  alert_at_pct: 0.8

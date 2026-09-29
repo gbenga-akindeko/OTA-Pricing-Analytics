@@ -1,0 +1,37 @@
+# Cloud Build definition for both services.
+#
+# Use this when building in the cloud instead of locally. It exists because
+# `gcloud builds submit --tag` can only build a Dockerfile at the root of the
+# build context, and both of ours live in subdirectories while needing the
+# whole repository as context (they COPY src/ and sql/).
+#
+#   gcloud builds submit --config cloudbuild.yaml \
+#     --substitutions=_SERVICE=collector_svc,_REGION=europe-west2 .
+#
+# Building in the cloud also sidesteps the architecture trap: Cloud Build
+# always produces linux/amd64, which is what Cloud Run requires. A local
+# `docker build` on an Apple Silicon Mac produces arm64 and the deploy fails
+# with a confusing error, unless you pass --platform linux/amd64.
+substitutions:
+  _SERVICE: collector_svc
+  _REGION: europe-west2
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --file=services/${_SERVICE}/Dockerfile
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:$SHORT_SHA
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:latest
+      - .
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/tvd-ota-fareiq/${_SERVICE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+timeout: 1200s

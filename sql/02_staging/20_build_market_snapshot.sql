@@ -1,0 +1,175 @@
+-- =====================================================================
+-- Build fact_market_snapshot for one collection window.
+-- Parameters: @window_start, @window_end
+--
+-- Rules that matter:
+--  * Market statistics use COMPETITOR offers only, and "competitor" means a
+--    price a CUSTOMER could pay elsewhere: an airline selling direct, a rival
+--    OTA, a metasearch listing. It explicitly does NOT mean a GDS or NDC
+--    channel. Amadeus, Sabre and Verteil tell us what a flight COSTS us
+--    through that channel; folding those into the market median would be
+--    comparing our own cost against itself and the index would be
+--    meaningless. Channel prices get their own view, v_channel_arbitrage.
+--  * Including our own price in the median we then compare ourselves to is
+--    circular and will make the index drift toward 1.0 as our panel share
+--    grows.
+--  * Blocking DQ flags are excluded, warnings are kept.
+--  * We take the CHEAPEST comparable offer per seller per cell, because a
+--    seller showing 40 offers should not dominate the distribution.
+-- =====================================================================
+
+DECLARE window_start TIMESTAMP DEFAULT @window_start;
+DECLARE window_end   TIMESTAMP DEFAULT @window_end;
+
+CREATE TEMP TABLE cell_offers AS
+SELECT * EXCEPT(rn) FROM (
+  SELECT
+    o.*,
+    -- A price a customer could actually pay somewhere else. Supply channels
+    -- (GDS_CHANNEL, NDC_CHANNEL) are deliberately excluded: they are our cost.
+    (o.seller_type IN ('COMPETITOR_OTA', 'AIRLINE_DIRECT', 'METASEARCH')) AS is_competitor,
+    ROW_NUMBER() OVER (
+      PARTITION BY o.collection_window, o.route_key, o.departure_date, o.cabin,
+                   o.trip_type, o.pos_country, o.seller_id
+      ORDER BY o.comparable_cost_base ASC
+    ) AS rn
+  FROM `${PROJECT}.tvd_fareiq_mart.fact_offer` o
+  WHERE o.collected_at >= window_start AND o.collected_at < window_end
+    AND NOT EXISTS (SELECT 1 FROM UNNEST(o.dq_flags) f WHERE f LIKE 'BLOCKING_%')
+) WHERE rn = 1;
+
+
+CREATE TEMP TABLE market_stats AS
+SELECT
+  collection_window,
+  DATE(collection_window) AS snapshot_date,
+  route_key, departure_date, cabin, trip_type, pos_country,
+  ANY_VALUE(days_to_departure) AS days_to_departure,
+  ANY_VALUE(dtd_bucket)        AS dtd_bucket,
+
+  COUNT(DISTINCT seller_id)                                    AS sellers_observed,
+  COUNT(DISTINCT IF(is_competitor, seller_id, NULL))           AS competitor_sellers,
+  COUNT(*)                                                     AS offers_observed,
+  COUNT(DISTINCT marketing_carrier)                            AS carriers_observed,
+
+  MIN(IF(is_competitor, comparable_cost_base, NULL))        AS market_min,
+  APPROX_QUANTILES(IF(is_competitor, comparable_cost_base, NULL), 100)[OFFSET(25)] AS market_p25,
+  APPROX_QUANTILES(IF(is_competitor, comparable_cost_base, NULL), 100)[OFFSET(50)] AS market_median,
+  AVG(IF(is_competitor, comparable_cost_base, NULL))        AS market_mean,
+  SAFE_DIVIDE(
+    SUM(IF(is_competitor, comparable_cost_base * COALESCE(ds.benchmark_weight, 1.0), 0)),
+    SUM(IF(is_competitor, COALESCE(ds.benchmark_weight, 1.0), 0))
+  )                                                            AS market_weighted_mean,
+  APPROX_QUANTILES(IF(is_competitor, comparable_cost_base, NULL), 100)[OFFSET(75)] AS market_p75,
+  MAX(IF(is_competitor, comparable_cost_base, NULL))        AS market_max,
+  STDDEV(IF(is_competitor, comparable_cost_base, NULL))     AS market_stddev,
+
+  MIN(IF(is_our_offer, displayed_total_base, NULL))            AS our_displayed_total,
+  MIN(IF(is_our_offer, true_customer_cost_base, NULL))         AS our_true_cost,
+  MIN(IF(is_our_offer, comparable_cost_base, NULL))            AS our_comparable_cost,
+  ANY_VALUE(IF(is_our_offer, seller_id, NULL))                 AS our_seller_id
+FROM cell_offers co
+LEFT JOIN `${PROJECT}.tvd_fareiq_mart.dim_seller` ds USING (seller_id)
+GROUP BY collection_window, route_key, departure_date, cabin, trip_type, pos_country;
+
+
+CREATE TEMP TABLE cheapest AS
+SELECT * EXCEPT(rn, price_rank) FROM (
+  SELECT
+    collection_window, route_key, departure_date, cabin, trip_type, pos_country,
+    seller_id AS cheapest_competitor_id,
+    comparable_cost_base AS cheapest_competitor_price,
+    ROW_NUMBER() OVER (PARTITION BY collection_window, route_key, departure_date, cabin, trip_type, pos_country
+                       ORDER BY comparable_cost_base) AS rn,
+    ROW_NUMBER() OVER (PARTITION BY collection_window, route_key, departure_date, cabin, trip_type, pos_country
+                       ORDER BY comparable_cost_base) AS price_rank
+  FROM cell_offers WHERE is_competitor
+) WHERE rn = 1;
+
+CREATE TEMP TABLE second_cheapest AS
+SELECT collection_window, route_key, departure_date, cabin, trip_type, pos_country,
+       comparable_cost_base AS second_cheapest_price
+FROM (
+  SELECT co.*, ROW_NUMBER() OVER (PARTITION BY collection_window, route_key, departure_date, cabin, trip_type, pos_country
+                                  ORDER BY comparable_cost_base) AS rn
+  FROM cell_offers co WHERE is_competitor
+) WHERE rn = 2;
+
+-- Our rank inside the full panel including ourselves.
+CREATE TEMP TABLE our_rank AS
+SELECT collection_window, route_key, departure_date, cabin, trip_type, pos_country, our_market_rank
+FROM (
+  SELECT collection_window, route_key, departure_date, cabin, trip_type, pos_country, is_our_offer,
+         RANK() OVER (PARTITION BY collection_window, route_key, departure_date, cabin, trip_type, pos_country
+                      ORDER BY comparable_cost_base) AS our_market_rank
+  FROM cell_offers
+  WHERE is_our_offer OR is_competitor
+) WHERE is_our_offer;
+
+-- Our unit economics for the cell, from the most recent supplier cost we hold.
+CREATE TEMP TABLE our_cost AS
+SELECT route_key, departure_date, cabin, pos_country,
+       APPROX_QUANTILES(supplier_cost_base / NULLIF(pax_count, 0), 100)[OFFSET(50)] AS our_supplier_cost
+FROM `${PROJECT}.tvd_fareiq_mart.fact_booking`
+WHERE booking_date >= DATE_SUB(DATE(window_start), INTERVAL 30 DAY)
+GROUP BY route_key, departure_date, cabin, pos_country;
+
+
+MERGE `${PROJECT}.tvd_fareiq_mart.fact_market_snapshot` T
+USING (
+  SELECT
+    TO_HEX(SHA256(CONCAT(CAST(m.collection_window AS STRING), m.route_key, CAST(m.departure_date AS STRING),
+                         m.cabin, m.trip_type, m.pos_country))) AS market_sk,
+    m.collection_window, m.snapshot_date, m.route_key, m.departure_date,
+    m.cabin, m.trip_type, m.pos_country, m.days_to_departure, m.dtd_bucket,
+    m.sellers_observed, m.competitor_sellers, m.offers_observed, m.carriers_observed,
+    LEAST(SAFE_DIVIDE(m.competitor_sellers, ${EXPECTED_PANEL_SIZE}), 1.0) AS coverage_score,
+
+    c.cheapest_competitor_id,
+    c.cheapest_competitor_price,
+    sc.second_cheapest_price,
+    m.market_min, m.market_p25, m.market_median, m.market_mean, m.market_weighted_mean,
+    m.market_p75, m.market_max, m.market_stddev,
+    SAFE_DIVIDE(m.market_stddev, NULLIF(m.market_median, 0)) AS market_dispersion,
+
+    m.our_seller_id, m.our_displayed_total, m.our_true_cost, m.our_comparable_cost,
+    r.our_market_rank,
+    m.our_comparable_cost - c.cheapest_competitor_price AS price_gap_abs,
+    SAFE_DIVIDE(m.our_comparable_cost - c.cheapest_competitor_price, NULLIF(c.cheapest_competitor_price, 0)) AS price_gap_pct,
+    SAFE_DIVIDE(m.our_comparable_cost, NULLIF(m.market_median, 0))              AS price_index_vs_median,
+    SAFE_DIVIDE(m.our_comparable_cost, NULLIF(c.cheapest_competitor_price, 0))  AS price_index_vs_cheapest,
+
+    oc.our_supplier_cost,
+    m.our_comparable_cost - oc.our_supplier_cost AS our_gross_margin_abs,
+    SAFE_DIVIDE(m.our_comparable_cost - oc.our_supplier_cost, NULLIF(m.our_comparable_cost, 0)) AS our_gross_margin_pct,
+
+    SAFE_DIVIDE(m.market_median - h1.market_median, NULLIF(h1.market_median, 0)) AS median_change_1d_pct,
+    SAFE_DIVIDE(m.market_median - h7.market_median, NULLIF(h7.market_median, 0)) AS median_change_7d_pct,
+    SAFE_DIVIDE(c.cheapest_competitor_price - h1.cheapest_competitor_price, NULLIF(h1.cheapest_competitor_price, 0)) AS cheapest_change_1d_pct,
+    SAFE_DIVIDE(m.our_comparable_cost, NULLIF(m.market_median, 0)) - h7.price_index_vs_median AS our_index_change_7d,
+    CURRENT_TIMESTAMP() AS computed_at
+  FROM market_stats m
+  LEFT JOIN cheapest c        USING (collection_window, route_key, departure_date, cabin, trip_type, pos_country)
+  LEFT JOIN second_cheapest sc USING (collection_window, route_key, departure_date, cabin, trip_type, pos_country)
+  LEFT JOIN our_rank r        USING (collection_window, route_key, departure_date, cabin, trip_type, pos_country)
+  LEFT JOIN our_cost oc       USING (route_key, departure_date, cabin, pos_country)
+  LEFT JOIN `${PROJECT}.tvd_fareiq_mart.fact_market_snapshot` h1
+         ON h1.route_key = m.route_key AND h1.departure_date = m.departure_date
+        AND h1.cabin = m.cabin AND h1.pos_country = m.pos_country
+        AND h1.collection_window = TIMESTAMP_SUB(m.collection_window, INTERVAL 24 HOUR)
+  LEFT JOIN `${PROJECT}.tvd_fareiq_mart.fact_market_snapshot` h7
+         ON h7.route_key = m.route_key AND h7.departure_date = m.departure_date
+        AND h7.cabin = m.cabin AND h7.pos_country = m.pos_country
+        AND h7.collection_window = TIMESTAMP_SUB(m.collection_window, INTERVAL 168 HOUR)
+) S
+ON T.market_sk = S.market_sk AND T.snapshot_date = S.snapshot_date
+WHEN MATCHED THEN UPDATE SET
+  our_comparable_cost = S.our_comparable_cost,
+  price_gap_abs = S.price_gap_abs,
+  price_gap_pct = S.price_gap_pct,
+  price_index_vs_median = S.price_index_vs_median,
+  price_index_vs_cheapest = S.price_index_vs_cheapest,
+  our_market_rank = S.our_market_rank,
+  coverage_score = S.coverage_score,
+  computed_at = S.computed_at
+WHEN NOT MATCHED THEN INSERT ROW;

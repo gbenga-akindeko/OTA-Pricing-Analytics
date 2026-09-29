@@ -1,0 +1,885 @@
+<title>TVD OTA FareIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --ground:#F5F7F3;
+  --surface:#FFFFFF;
+  --surface-2:#EDF1EA;
+  --ink:#111D17;
+  --ink-2:#3B4C43;
+  --ink-3:#6C7C72;
+  --rule:#D6DED4;
+  --rule-2:#C0CBBD;
+  --accent:#0E5B40;
+  --accent-soft:#DCEBE1;
+  --warn:#9A5A16;
+  --warn-soft:#F5E7D4;
+  --alert:#96281F;
+  --alert-soft:#F6DEDB;
+  --good:#2F6B3D;
+
+  --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  --f-body:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  --measure:69ch;
+  --pad:clamp(20px,4vw,56px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0C1411;
+    --surface:#121D18;
+    --surface-2:#16241E;
+    --ink:#E3EBE5;
+    --ink-2:#B3C2B9;
+    --ink-3:#7F9089;
+    --rule:#25352D;
+    --rule-2:#33473C;
+    --accent:#54BE8D;
+    --accent-soft:#163024;
+    --warn:#D89A4C;
+    --warn-soft:#2E2415;
+    --alert:#DE7A6E;
+    --alert-soft:#311B18;
+    --good:#6FBF80;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0C1411;
+  --surface:#121D18;
+  --surface-2:#16241E;
+  --ink:#E3EBE5;
+  --ink-2:#B3C2B9;
+  --ink-3:#7F9089;
+  --rule:#25352D;
+  --rule-2:#33473C;
+  --accent:#54BE8D;
+  --accent-soft:#163024;
+  --warn:#D89A4C;
+  --warn-soft:#2E2415;
+  --alert:#DE7A6E;
+  --alert-soft:#311B18;
+  --good:#6FBF80;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--f-body);
+  font-size:17px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--accent-soft);color:var(--ink)}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:2px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1180px;margin:0 auto;padding:0 var(--pad)}
+.col{max-width:var(--measure)}
+
+h1,h2,h3,h4{font-family:var(--f-display);text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,5.4vw,58px);line-height:1.02;letter-spacing:-.028em;font-weight:700}
+h2{font-size:clamp(25px,3.1vw,34px);line-height:1.12;letter-spacing:-.02em;font-weight:600}
+h3{font-size:19px;line-height:1.3;letter-spacing:-.008em;font-weight:600;margin-top:34px}
+h4{font-size:15px;letter-spacing:.01em;font-weight:600}
+p{margin:0 0 1.05em}
+strong{font-weight:600}
+
+.eyebrow{
+  font-family:var(--f-mono);font-size:11px;font-weight:500;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);
+}
+.mono{font-family:var(--f-mono);font-size:.88em}
+code{font-family:var(--f-mono);font-size:.85em;background:var(--surface-2);
+  padding:.12em .4em;border-radius:3px;color:var(--ink)}
+
+/* ---------- masthead ---------- */
+header.mast{
+  border-bottom:1px solid var(--rule);
+  background:var(--surface);
+}
+.mast-inner{padding:clamp(46px,7vw,86px) 0 clamp(34px,4vw,52px)}
+.mast h1{margin:14px 0 22px}
+.lede{font-size:clamp(18px,2vw,21px);line-height:1.5;color:var(--ink-2);max-width:60ch}
+.mast-meta{
+  display:flex;flex-wrap:wrap;gap:0 34px;margin-top:34px;
+  padding-top:22px;border-top:1px solid var(--rule);
+}
+.mast-meta div{padding:6px 0}
+.mast-meta dt{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:3px}
+.mast-meta dd{margin:0;font-family:var(--f-display);font-size:15px;font-weight:500}
+
+.question{
+  margin-top:36px;padding:22px 26px;
+  border-left:3px solid var(--accent);
+  background:var(--accent-soft);
+  border-radius:0 6px 6px 0;
+}
+.question p{margin:0;font-size:19px;line-height:1.45;font-weight:600;font-family:var(--f-display);letter-spacing:-.012em}
+.question .eyebrow{display:block;margin-bottom:9px}
+
+/* ---------- contents ---------- */
+nav.toc{border-bottom:1px solid var(--rule);padding:28px 0 30px}
+.toc ol{list-style:none;margin:14px 0 0;padding:0;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:2px 26px;counter-reset:t}
+.toc li{counter-increment:t}
+.toc a{display:flex;gap:11px;padding:7px 0;text-decoration:none;color:var(--ink);
+  font-family:var(--f-display);font-size:14.5px;font-weight:500;border-bottom:1px solid transparent}
+.toc a:hover{border-bottom-color:var(--rule-2)}
+.toc a::before{content:counter(t,decimal-leading-zero);font-family:var(--f-mono);
+  font-size:11px;color:var(--ink-3);padding-top:3px;font-weight:500}
+
+/* ---------- sections ---------- */
+section{padding:clamp(46px,6vw,76px) 0;border-bottom:1px solid var(--rule)}
+.sec-head{display:flex;gap:20px;align-items:baseline;margin-bottom:26px}
+.sec-num{font-family:var(--f-mono);font-size:12px;font-weight:600;color:var(--accent);
+  letter-spacing:.08em;padding-top:4px;flex:none}
+.sec-head p.sub{margin:9px 0 0;color:var(--ink-2);max-width:58ch;font-size:16px}
+
+/* ---------- pipeline ---------- */
+.pipe{display:grid;gap:9px;margin:26px 0 8px;
+  grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
+.stage{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+  padding:14px 15px 15px;display:flex;flex-direction:column;gap:6px;min-height:100%}
+.stage .n{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;color:var(--ink-3)}
+.stage .t{font-family:var(--f-display);font-size:14.5px;font-weight:600;line-height:1.25}
+.stage .d{font-size:13.5px;line-height:1.45;color:var(--ink-2);font-family:var(--f-body)}
+.stage.hi{border-color:var(--accent);background:var(--accent-soft)}
+.stage.hi .d{color:var(--ink-2)}
+
+/* ---------- tiers ---------- */
+.tiers{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);
+  border-radius:5px;overflow:hidden;margin:22px 0}
+.tier{background:var(--surface);padding:15px 18px;display:grid;gap:4px 20px;
+  grid-template-columns:minmax(0,1fr);align-items:start}
+@media(min-width:760px){.tier{grid-template-columns:180px minmax(0,1fr) 108px}}
+.tier .name{font-family:var(--f-display);font-weight:600;font-size:14.5px}
+.tier .name span{display:block;font-family:var(--f-mono);font-size:10px;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);margin-top:3px}
+.tier .why{font-size:14px;line-height:1.5;color:var(--ink-2)}
+.tier .trust{font-family:var(--f-mono);font-size:12.5px;color:var(--ink-2);
+  font-variant-numeric:tabular-nums}
+.tier .trust b{display:block;font-size:19px;color:var(--ink);font-weight:600}
+
+/* ---------- tables ---------- */
+.scroll{overflow-x:auto;margin:22px 0;border:1px solid var(--rule);border-radius:5px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-family:var(--f-mono);font-size:12.5px;
+  font-variant-numeric:tabular-nums;min-width:620px}
+th{text-align:left;padding:11px 13px;font-weight:600;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--rule-2);white-space:nowrap}
+td{padding:10px 13px;border-bottom:1px solid var(--rule);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right}
+.t-prose td,.t-prose th{font-family:var(--f-body);font-size:14.5px;line-height:1.45}
+.t-prose td{white-space:normal}
+
+.chip{display:inline-block;font-family:var(--f-mono);font-size:10px;font-weight:600;
+  letter-spacing:.07em;padding:2.5px 7px;border-radius:3px;white-space:nowrap}
+.c-good{background:var(--accent-soft);color:var(--accent)}
+.c-warn{background:var(--warn-soft);color:var(--warn)}
+.c-alert{background:var(--alert-soft);color:var(--alert)}
+.c-mute{background:var(--surface-2);color:var(--ink-3)}
+
+/* ---------- compare ---------- */
+.compare{display:grid;gap:14px;margin:24px 0;grid-template-columns:1fr}
+@media(min-width:720px){.compare{grid-template-columns:1fr 1fr}}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:5px;padding:18px 20px 20px}
+.card.win{border-color:var(--accent);border-width:1.5px}
+.card h4{margin:0 0 2px}
+.card .who{font-family:var(--f-mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:13px}
+.lines{display:grid;gap:0;font-family:var(--f-mono);font-size:13px;font-variant-numeric:tabular-nums}
+.lines div{display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px dotted var(--rule)}
+.lines div.total{border-bottom:none;border-top:1.5px solid var(--rule-2);margin-top:5px;
+  padding-top:9px;font-weight:600;font-size:14.5px}
+.lines .k{color:var(--ink-2)}
+.verdict{margin-top:16px;padding:14px 18px;border-radius:5px;background:var(--accent-soft);
+  border-left:3px solid var(--accent);font-size:15px;line-height:1.5}
+.verdict b{font-family:var(--f-display)}
+
+/* ---------- figure ---------- */
+figure{margin:26px 0;background:var(--surface);border:1px solid var(--rule);
+  border-radius:5px;padding:20px 20px 14px;overflow-x:auto}
+figure svg{display:block;width:100%;height:auto;min-width:520px}
+figcaption{font-size:13.5px;line-height:1.5;color:var(--ink-2);margin-top:12px;
+  padding-top:12px;border-top:1px solid var(--rule);max-width:74ch}
+figcaption b{font-family:var(--f-display);color:var(--ink)}
+
+/* ---------- callout ---------- */
+.note{border-left:3px solid var(--rule-2);padding:4px 0 4px 20px;margin:24px 0;color:var(--ink-2);font-size:16px}
+.note strong{color:var(--ink)}
+.flag{background:var(--warn-soft);border-left:3px solid var(--warn);padding:16px 20px;
+  border-radius:0 5px 5px 0;margin:24px 0;font-size:15.5px;line-height:1.55}
+.flag .eyebrow{display:block;color:var(--warn);margin-bottom:7px}
+
+/* ---------- lists ---------- */
+ul.tight{margin:0 0 1.1em;padding-left:1.15em}
+ul.tight li{margin-bottom:.42em}
+ul.tight li::marker{color:var(--ink-3)}
+
+.grid2{display:grid;gap:26px 40px;grid-template-columns:1fr}
+@media(min-width:820px){.grid2{grid-template-columns:1fr 1fr}}
+
+/* ---------- roadmap ---------- */
+.phase{display:grid;gap:6px 24px;padding:20px 0;border-top:1px solid var(--rule);
+  grid-template-columns:1fr}
+@media(min-width:800px){.phase{grid-template-columns:160px minmax(0,1fr) 200px}}
+.phase:first-of-type{border-top:none}
+.phase .when{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent);padding-top:4px}
+.phase .when b{display:block;font-family:var(--f-display);font-size:17px;letter-spacing:-.01em;
+  text-transform:none;color:var(--ink);margin-bottom:4px}
+.phase .body p{margin:0 0 .55em;font-size:15.5px}
+.phase .body ul{margin:0;padding-left:1.1em;font-size:15px}
+.phase .body li{margin-bottom:.3em}
+.phase .out{font-family:var(--f-mono);font-size:12px;line-height:1.55;color:var(--ink-2);
+  background:var(--surface-2);padding:12px 14px;border-radius:4px;align-self:start}
+.phase .out b{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:5px}
+
+footer{padding:44px 0 60px;color:var(--ink-3);font-size:13.5px}
+footer p{max-width:74ch}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<header class="mast">
+  <div class="wrap mast-inner">
+    <span class="eyebrow">Platform design &middot; Revenue management &middot; Rev 1.0</span>
+    <h1>TVD OTA FareIQ</h1>
+    <p class="lede">A competitive pricing intelligence and revenue management platform for the TravelDen OTA. It watches what the market charges, works out what a trip actually costs a customer once fees are counted, and tells a pricing analyst what to do about it before the market opens.</p>
+
+    <div class="question">
+      <span class="eyebrow">The question it answers every morning</span>
+      <p>What is the market charging today, where are we positioned, what price should we offer, why, and what revenue or margin impact should we expect?</p>
+    </div>
+
+    <dl class="mast-meta">
+      <div><dt>Warehouse</dt><dd>BigQuery, europe-west2</dd></div>
+      <div><dt>Scope at launch</dt><dd>~150 routes, LOS and ABV origins</dd></div>
+      <div><dt>Base currency</dt><dd>NGN</dd></div>
+      <div><dt>Control model</dt><dd>Recommend, human approves</dd></div>
+      <div><dt>Dashboard</dt><dd>Apps Script web app, six pages</dd></div>
+      <div><dt>Code</dt><dd>92 tests passing</dd></div>
+    </dl>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <span class="eyebrow">Contents</span>
+    <ol>
+      <li><a href="#arch">System architecture</a></li>
+      <li><a href="#model">Data model</a></li>
+      <li><a href="#sources">Data sources</a></li>
+      <li><a href="#method">Pricing methodology</a></li>
+      <li><a href="#stack">Python and BigQuery</a></li>
+      <li><a href="#dash">Dashboard design</a></li>
+      <li><a href="#auto">Automation workflow</a></li>
+      <li><a href="#logic">Recommendation logic</a></li>
+      <li><a href="#road">Implementation roadmap</a></li>
+    </ol>
+  </div>
+</nav>
+
+<main>
+
+<!-- ================================================== 1 -->
+<section id="arch">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <div>
+        <h2>System architecture</h2>
+        <p class="sub">Seven stages, each with one job. Everything is stateless except BigQuery and Cloud Storage, so any stage can be replayed from the stage before it.</p>
+      </div>
+    </div>
+
+    <div class="pipe">
+      <div class="stage"><span class="n">01 &middot; SOURCES</span><span class="t">GDS, NDC, licensed feeds, our PSS</span><span class="d">Four tiers behind one collector interface. Adding a source means writing an adapter, not touching the pipeline.</span></div>
+      <div class="stage"><span class="n">02 &middot; PYTHON</span><span class="t">Cloud Run collector</span><span class="d">Async sweeps with per-source rate limits and a compliance preflight. Normalises everything to one offer shape.</span></div>
+      <div class="stage"><span class="n">03 &middot; STORAGE</span><span class="t">Cloud Storage, JSONL</span><span class="d">The replay log. Partitioned by date and hour. A parser bug found in March is fixable against January's data.</span></div>
+      <div class="stage hi"><span class="n">04 &middot; WAREHOUSE</span><span class="t">BigQuery</span><span class="d">Raw, staging, mart. The analytical source of truth. Every number on every dashboard resolves here.</span></div>
+      <div class="stage"><span class="n">05 &middot; ENGINE</span><span class="t">Pricing engine</span><span class="d">True customer cost, market statistics, floors and targets, classification. Pure functions, no I/O, fully tested.</span></div>
+      <div class="stage"><span class="n">06 &middot; ENGINE</span><span class="t">Recommendation engine</span><span class="d">Elasticity, expected impact, confidence, priority, and a rationale a human can argue with.</span></div>
+      <div class="stage"><span class="n">07 &middot; PEOPLE</span><span class="t">Apps Script dashboard, Sheets, Gmail</span><span class="d">The analyst approves in the dashboard, two clicks from the evidence. The digest lands at 07:00 and the audit trail records who decided what.</span></div>
+    </div>
+
+    <h3>Why the raw layer is not optional</h3>
+    <p>Landing every response verbatim to Cloud Storage before it reaches BigQuery costs almost nothing and buys three things that are expensive to retrofit. A load job is free where streaming inserts are not. A failed load leaves the file intact for a rerun rather than a hole in the day. And when the ancillary parser turns out to have been dropping a fee code for six weeks, the fix is a reprocess, not an apology.</p>
+
+    <h3>Region and residency</h3>
+    <p>All datasets sit in one BigQuery region, because cross-region joins are not permitted and discovering that after loading a year of history is a migration nobody enjoys. <code>europe-west2</code> is the recommendation: it carries the full BigQuery ML and BI Engine feature set, and the latency from Lagos is not material for a batch pipeline. <code>africa-south1</code> is the alternative if a data residency requirement appears; check ML feature availability there before committing, because that constraint is not reversible without a rebuild.</p>
+
+    <div class="flag">
+      <span class="eyebrow">Design constraint worth stating early</span>
+      Nothing in this architecture writes a price to the booking engine automatically. The pricing service is the only writer to the decision log, and it refuses any approved price below the policy floor, including one a human typed. Automation earns that right later, on evidence, and section&nbsp;09 says what evidence.
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 2 -->
+<section id="model">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <div>
+        <h2>Data model</h2>
+        <p class="sub">Five facts, six dimensions, three layers. Grain is stated on every table, because a grain error is the one modelling mistake that makes every downstream number quietly wrong.</p>
+      </div>
+    </div>
+
+    <div class="scroll">
+      <table class="t-prose">
+        <thead><tr><th>Table</th><th>Grain: one row per&hellip;</th><th>Partition / cluster</th><th>Why it exists</th></tr></thead>
+        <tbody>
+          <tr><td><code>raw.offer_snapshot</code></td><td>priced offer, per source, per collection call</td><td>DATE(collected_at) / origin, destination, seller, departure</td><td>Immutable replay log. Every figure traces back here, with its legal basis on the row.</td></tr>
+          <tr><td><code>mart.fact_offer</code></td><td>priced offer, typed and costed</td><td>DATE(collected_at) / route, departure, cabin, seller</td><td>Adds true customer cost, FX at the observation date, and data quality flags.</td></tr>
+          <tr><td><code>mart.fact_market_snapshot</code></td><td>route &times; departure &times; cabin &times; POS &times; hour</td><td>snapshot_date / route, departure, cabin</td><td>Pre-aggregated market statistics. The dashboard and the engine both read this, never <code>fact_offer</code>.</td></tr>
+          <tr><td><code>mart.fact_price_recommendation</code></td><td>recommendation</td><td>review_date / route, priority, classification</td><td>Every recommendation ever produced, acted on or not. The evidence base for scoring the engine.</td></tr>
+          <tr><td><code>mart.fact_price_decision</code></td><td>human decision</td><td>DATE(decided_at) / approver, decision</td><td>Append only by IAM. The commercial record of who priced what, when, on what benchmark.</td></tr>
+          <tr><td><code>mart.fact_booking</code></td><td>ticketed booking</td><td>booking_date / route, carrier, cabin</td><td>One agreed margin definition. Joined to snapshots to estimate elasticity.</td></tr>
+          <tr><td><code>mart.dim_airline_fee</code></td><td>fee version</td><td>DATE(valid_from) / carrier, fee type, is_current</td><td>Type 2. Never overwritten, because the fee history is the product, not a side effect.</td></tr>
+          <tr><td><code>mart.dim_pricing_rule</code></td><td>active rule</td><td>&mdash; / scope type, is_active</td><td>Business rules owned by the pricing team in Sheets, versioned into BigQuery on every sync.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <h3>The two columns that matter most</h3>
+        <p><code>comparable_cost_base</code> on <code>fact_offer</code> is the comparison currency of the entire platform. It is the headline price, converted at the FX rate of the observation date, plus baggage, seat, payment and other up-front fees, minus the monetised value of flexibility, plus a penalty for each connection beyond the baseline. Every market statistic, every index and every recommendation is computed on it. Headline price is stored, reported and never compared.</p>
+        <p><code>competitor_benchmark</code> on <code>fact_price_decision</code> is a frozen copy of the market at the moment of decision. It is deliberately denormalised. Reconstructing what an analyst was looking at six months ago by joining back to live data is how audit trails become fiction.</p>
+      </div>
+      <div>
+        <h3>Modelling decisions worth defending</h3>
+        <ul class="tight">
+          <li><b>Market statistics exclude our own price.</b> Including it in the median we then compare ourselves against is circular, and the index drifts toward 1.0 as our share of the observed panel grows.</li>
+          <li><b>One offer per seller per cell.</b> The cheapest comparable. A seller returning forty itineraries should not dominate the distribution.</li>
+          <li><b>Coverage is a column, not a footnote.</b> A median computed from two sellers is not a market median, and the engine refuses to act on one.</li>
+          <li><b>FX at the observation date.</b> Naira volatility means restating history at today's rate would invent price movements that never happened.</li>
+          <li><b>Blocking versus warning DQ flags.</b> A missing carrier is a warning and the row still counts. A missing FX rate is blocking and it does not.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 3 -->
+<section id="sources">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <div>
+        <h2>Data sources</h2>
+        <p class="sub">Four tiers, in strict preference order, each carrying a trust score that follows its data all the way into the confidence on a recommendation.</p>
+      </div>
+    </div>
+
+    <div class="tiers">
+      <div class="tier">
+        <div class="name">Our own PSS<span>Tier 1 &middot; own system</span></div>
+        <div class="why">The only source that returns supplier cost alongside selling price. Every margin figure in the platform originates here, which makes it the first integration, not the last.</div>
+        <div class="trust"><b>1.00</b>trust</div>
+      </div>
+      <div class="tier">
+        <div class="name">GDS and NDC<span>Tier 2 &middot; contracted API</span></div>
+        <div class="why">Amadeus for breadth and schedule authority, an NDC channel such as Duffel for branded fares and ancillary prices in the same response. The second of those is the single biggest accuracy win available for true customer cost.</div>
+        <div class="trust"><b>0.95</b>trust</div>
+      </div>
+      <div class="tier">
+        <div class="name">Licensed market feed<span>Tier 3 &middot; data licence</span></div>
+        <div class="why">Competitor prices under contract. This is the tier that legitimately answers "what is the market charging". Budget for it: the alternatives are guessing or scraping, and only one of those is defensible in a commercial dispute.</div>
+        <div class="trust"><b>0.85</b>trust</div>
+      </div>
+      <div class="tier">
+        <div class="name">Permitted public<span>Tier 4 &middot; last resort</span></div>
+        <div class="why">Off by default. Runs only against a source whose terms and robots directives have been reviewed and recorded, at six calls a minute, never circumventing an access control, never collecting personal data. Its trust score stops it being the sole basis for a price change.</div>
+        <div class="trust"><b>0.60</b>trust</div>
+      </div>
+    </div>
+
+    <h3>Compliance as a control, not a paragraph</h3>
+    <p><code>config/sources.yaml</code> is executable policy. The tier&nbsp;4 collector reads it at runtime and refuses to run against anything without a current review; a review older than ninety days stops collection automatically, without anyone remembering to intervene. Every raw row also records its own <code>legal_basis</code>, so any number on any dashboard can be traced to the right under which it was obtained. That matters commercially as well as legally: a licensed feed typically prohibits redistribution, and knowing which figures came from it is what lets you share a report at all.</p>
+
+    <h3>Filling the ancillary gap</h3>
+    <p>Shopping responses are inconsistent about baggage and near silent about seat and payment fees, and the carriers where this matters most on West African routes are the ones least likely to publish a structured feed. The model handles this in three ordered steps: use the fee quoted live if there is one; otherwise resolve from the type&nbsp;2 fee catalogue, most specific scope winning (route beats region beats global); otherwise leave it absent and drop the row's <code>fee_confidence</code>, which flows into the recommendation's confidence and eventually into whether an analyst sees it at all. The catalogue itself is maintained partly from ATPCO-style optional service data where licensed, and partly by hand in a Google Sheet for the long tail. Hand-maintained is not a failure state here, it is the only realistic path to coverage, and versioning it as type&nbsp;2 means a manual correction is still an auditable event.</p>
+
+    <h3>Collection by scraping, where it is permitted</h3>
+    <p>The permitted-public tier is real code, not a placeholder, and its guards are executable rather than written down. A source is fetched only if the register lists it, its terms have been reviewed as permitting collection, and that review is under ninety days old. <code>robots.txt</code> is parsed and obeyed per path, and its <code>Crawl-delay</code> overrides our own rate limit whenever it is slower. The user agent identifies us honestly and carries a contact address. Conditional requests mean an unchanged page is never re-fetched. Repeated rate limiting trips a breaker that pauses the source for the rest of the run.</p>
+    <p>What the module deliberately cannot do is as important as what it does: no CAPTCHA solving, no logging in, no session replay, no IP rotation, no browser fingerprint spoofing. A 401 or 403 ends collection from that source rather than starting a workaround, because an access control is a no. Twelve tests in <code>tests/test_scraping.py</code> pin each of these, including that a half-filled register entry collects nothing at all.</p>
+
+    <h3>Mining the history, not just reading it</h3>
+    <p>A nightly Python job over the collected history answers the questions that come before pricing. Robust statistics flag prices far from their own cell&rsquo;s norm, and separate a suspected mistake fare from an ordinary outlier so one bad row cannot drag the market median. Competitors are measured on their position against the market rather than on raw price, so a fuel surcharge that lifts everyone flags nobody, and only the seller who actually moved appears. A sustained, stable level change is reported as a repricing decision rather than as a blip. A seller we usually see and did not see today raises a coverage signal, because coverage falling silently is the most dangerous failure here: every statistic keeps computing and simply becomes wrong.</p>
+    <p>Two pattern miners earn their place commercially: a departure day-of-week effect, and the days-to-departure band where the market steps up. Both are places our markup is currently flat and the market is not. K-means over four behavioural features then segments competitors as price leaders, followers, opportunists or premium, which predicts how they will answer our move far better than their size does.</p>
+
+    <div class="note"><strong>Collection cost is a design input.</strong> At one hourly sweep over 40 tier&nbsp;1 routes, 9 departure horizons and 2 cabins, that is 720 shop requests per source per hour before anything else. The tiering in <code>dim_route</code> exists to keep this bounded, and <code>config/sources.yaml</code> carries a hard monthly cap that stops the pipeline rather than overspending it.</div>
+  </div>
+</section>
+
+<!-- ================================================== 4 -->
+<section id="method">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <div>
+        <h2>Pricing methodology</h2>
+        <p class="sub">Two ideas do most of the work. The first stops us comparing the wrong numbers. The second stops us cutting price for the wrong reason.</p>
+      </div>
+    </div>
+
+    <h3>Idea one: true customer cost</h3>
+    <p>Headline price is not what the customer pays, and on routes where fee structures differ, comparing headline prices produces decisions that are wrong in a consistent direction. Here is the case, with the figures pinned in <code>tests/test_true_cost.py</code> so the document and the code cannot drift apart.</p>
+
+    <div class="compare">
+      <div class="card">
+        <h4>Competitor A</h4>
+        <div class="who">Headline winner</div>
+        <div class="lines">
+          <div><span class="k">Headline fare</span><span>&#8358;950,000</span></div>
+          <div><span class="k">First checked bag</span><span>&#8358;60,000</span></div>
+          <div><span class="k">Standard seat</span><span>&#8358;12,000</span></div>
+          <div class="total"><span>True customer cost</span><span>&#8358;1,022,000</span></div>
+        </div>
+      </div>
+      <div class="card win">
+        <h4>Us</h4>
+        <div class="who">Actually cheaper</div>
+        <div class="lines">
+          <div><span class="k">Headline fare</span><span>&#8358;1,000,000</span></div>
+          <div><span class="k">First checked bag</span><span>included</span></div>
+          <div><span class="k">Standard seat</span><span>included</span></div>
+          <div class="total"><span>True customer cost</span><span>&#8358;1,000,000</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="verdict">On the headline we look <b>&#8358;50,000 more expensive</b>. All in, we are <b>&#8358;22,000 cheaper</b>. A platform comparing headline prices would recommend a discount here, giving away margin to fix a problem that does not exist, and would keep doing it every day until someone noticed.</div>
+
+    <p>Two smaller adjustments sit alongside the fees, and both exist to make offers genuinely comparable rather than merely priced. Change and cancellation fees are not paid up front, so they do not raise true customer cost; they are valued at the probability of being incurred, which correctly recognises a flexible fare as worth more than a rigid one at the same price. And a connection costs the traveller something real, so each stop beyond the baseline adds a configured penalty to the comparable figure. Both constants live in <code>EngineConfig</code> and are meant to be argued about by the commercial team, not fixed by engineering.</p>
+
+    <h3>Idea two: a cut has to pay for itself</h3>
+    <p>The brief was explicit that a competitor being cheaper is not by itself a reason to reduce price. That principle needs a test, not a sentiment, and there is an exact one. For a constant elasticity demand curve, margin is unchanged by a marginal price cut when</p>
+    <p style="text-align:center;font-family:var(--f-mono);font-size:15px;margin:18px 0 22px;color:var(--ink)">|elasticity| &nbsp;=&nbsp; price &divide; (price &minus; cost)</p>
+    <p>Below that bar, discounting buys volume at a loss. The chart shows how brutal the arithmetic is at OTA margins.</p>
+
+    <figure>
+      <svg viewBox="0 0 760 470" role="img" aria-label="Break-even share elasticity against gross margin percentage. The required elasticity rises steeply as margin falls, exceeding the plausible range below about seven percent margin.">
+        <!-- plausible band -->
+        <rect x="80" y="176" width="620" height="150" fill="var(--accent-soft)"></rect>
+        <text x="690" y="196" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)" letter-spacing="1">PLAUSIBLE SHARE ELASTICITY &minus;4 TO &minus;15</text>
+
+        <!-- danger zone -->
+        <rect x="80" y="40" width="103" height="340" fill="var(--alert-soft)" opacity="0.75"></rect>
+
+        <!-- grid -->
+        <g stroke="var(--rule)" stroke-width="1">
+          <line x1="80" y1="312" x2="700" y2="312"></line>
+          <line x1="80" y1="244" x2="700" y2="244"></line>
+          <line x1="80" y1="176" x2="700" y2="176"></line>
+          <line x1="80" y1="108" x2="700" y2="108"></line>
+          <line x1="80" y1="40"  x2="700" y2="40"></line>
+        </g>
+
+        <!-- axes -->
+        <line x1="80" y1="40" x2="80" y2="380" stroke="var(--rule-2)" stroke-width="1.5"></line>
+        <line x1="80" y1="380" x2="700" y2="380" stroke="var(--rule-2)" stroke-width="1.5"></line>
+
+        <!-- y labels -->
+        <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-3)" text-anchor="end">
+          <text x="70" y="316">5</text>
+          <text x="70" y="248">10</text>
+          <text x="70" y="180">15</text>
+          <text x="70" y="112">20</text>
+          <text x="70" y="44">25</text>
+        </g>
+        <!-- x labels -->
+        <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-3)" text-anchor="middle">
+          <text x="146" y="398">5%</text>
+          <text x="257" y="398">10%</text>
+          <text x="368" y="398">15%</text>
+          <text x="479" y="398">20%</text>
+          <text x="589" y="398">25%</text>
+          <text x="700" y="398">30%</text>
+        </g>
+
+        <!-- curve: |e| = 1/margin -->
+        <path d="M124,40 L146,108 L169,153 L191,186 L213,210 L257,244 L301,267 L368,289 L479,312 L589,326 L700,335"
+              fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
+        <g fill="var(--accent)">
+          <circle cx="146" cy="108" r="3.5"></circle>
+          <circle cx="257" cy="244" r="3.5"></circle>
+          <circle cx="479" cy="312" r="3.5"></circle>
+        </g>
+
+        <!-- annotations -->
+        <line x1="183" y1="40" x2="183" y2="380" stroke="var(--alert)" stroke-width="1.5" stroke-dasharray="4 3"></line>
+        <text x="192" y="58" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--alert)" font-weight="600">6.7% margin</text>
+        <text x="192" y="73" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--alert)">below this, a cut never pays</text>
+
+        <text x="270" y="238" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-2)">10% margin needs |e| &gt; 10</text>
+        <text x="492" y="306" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-2)">20% margin needs |e| &gt; 5</text>
+
+        <!-- axis titles -->
+        <text x="390" y="424" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-3)" letter-spacing="1.4">GROSS MARGIN ON THE SALE</text>
+        <text x="20" y="210" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--ink-3)" letter-spacing="1.4" transform="rotate(-90 20 210)">BREAK-EVEN |ELASTICITY|</text>
+
+        <text x="80" y="452" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--ink-3)">|e| = price / (price &minus; cost) &nbsp;&middot;&nbsp; equivalently 1 / margin share</text>
+      </svg>
+      <figcaption><b>Thin margins make discounting arithmetically hopeless.</b> At a 5% margin a cut only pays if a 1% price reduction wins 20% more share. At 20% margin the bar drops to 5, which real flight shopping clears comfortably. The engine computes this per cell and, where the estimated elasticity does not reach the bar, refuses to recommend a cut and escalates instead: the gap is in the supplier cost, not the price.</figcaption>
+    </figure>
+
+    <div class="flag">
+      <span class="eyebrow">The parameter that decides whether any of this works</span>
+      There are two elasticities and using the wrong one produces confidently wrong prices. <strong>Market demand elasticity</strong>, around &minus;1.0 to &minus;1.7, is how total travel demand on a route responds to the price level; it is what an airline uses to set fares and it is irrelevant to us. <strong>Competitive share elasticity</strong>, typically &minus;4 to &minus;15, is how our share of a fixed pool of shoppers responds to our position on the same screen as everyone else. Flights are close to a commodity and metasearch sorts by price, so share moves violently. Plugging &minus;1.4 into the break-even test makes the bar unreachable at any OTA margin and the engine would never recommend a cut at all. The BigQuery ML conversion model estimates the right quantity by regressing on <code>log(price_index)</code>, not <code>log(price)</code>.
+    </div>
+
+    <h3>Classification</h3>
+    <div class="scroll">
+      <table class="t-prose">
+        <thead><tr><th>Class</th><th>Condition</th><th>What it means commercially</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip c-good">COMPETITIVE</span></td><td>index 0.97&ndash;1.03</td><td>At market on true cost. No action, and no daily churn to prove the system is working.</td></tr>
+          <tr><td><span class="chip c-warn">WATCH</span></td><td>index 0.93&ndash;1.08</td><td>Drifting. Worth a look if the gap is large in money terms, not merely in percent.</td></tr>
+          <tr><td><span class="chip c-alert">UNCOMPETITIVE</span></td><td>outside 0.93&ndash;1.08</td><td>A real gap, in either direction. Acted on only after the value gate.</td></tr>
+          <tr><td><span class="chip c-good">MARGIN_OPPORTUNITY</span></td><td>index below 0.93</td><td>We are leaving money on the table. Usually the most valuable column on the morning report and the one teams forget to build.</td></tr>
+          <tr><td><span class="chip c-mute">PROTECTED</span></td><td>at the floor and uncompetitive, or the value gate fired</td><td>There is no mechanical answer. Renegotiate the supplier deal, switch carrier, or accept the share position. Never a silent hold.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 5 -->
+<section id="stack">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <div>
+        <h2>Python and BigQuery architecture</h2>
+        <p class="sub">The engine is pure functions over a dataclass. That is not a stylistic preference, it is what makes the commercial rules testable without a cloud connection.</p>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <h3>Division of labour</h3>
+        <p><strong>BigQuery does the set work.</strong> Fee resolution, FX conversion, market statistics, percentiles, day-over-day movement, elasticity regression. All of it is aggregation over partitions, which is what the warehouse is good at and what Python would be slow and expensive at.</p>
+        <p><strong>Python does the decision work.</strong> Policy resolution, floors and targets, constraints, classification, impact, confidence, priority, rationale. Branching business logic that changes often and needs to be argued about in a pull request.</p>
+        <p>The boundary is one query. <code>load_cells()</code> returns everything the engine needs for a review day in a single result set, and <code>PricingEngine.recommend()</code> touches no I/O at all. That is why the tests run in a second and a half and why a rule change can be reviewed on its merits rather than on whether the fixture data loaded.</p>
+        <p><strong>Mining is a third, separate job.</strong> It wants pandas and scikit-learn that the pricing path does not need, it is analytical rather than transactional, and it must be able to fail without stopping the morning review. So it runs as its own Cloud Run job at 05:45, between the transform and the recommendation run, and writes to its own table.</p>
+      </div>
+      <div>
+        <h3>Cost control, by construction</h3>
+        <ul class="tight">
+          <li><code>require_partition_filter</code> on the two large tables. An unfiltered scan fails rather than bills.</li>
+          <li>BI tools read views over <code>fact_market_snapshot</code>, never <code>fact_offer</code>. One row per priced cell per hour instead of one per offer per seller per hour, which is one to two orders of magnitude.</li>
+          <li>A <code>maximumBytesBilled</code> ceiling on every Apps Script query, so a mistake in a sheet formula cannot produce a surprising invoice.</li>
+          <li>Load jobs, not streaming inserts, for the collection path.</li>
+          <li>BI Engine reservation sized to the snapshot views, which is what makes the dashboard feel instant.</li>
+          <li>A per-user custom quota, so nobody scans the warehouse by accident.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Duplicated logic, deliberately</h3>
+    <p>True customer cost is implemented twice: once in <code>02_staging/10_build_fact_offer.sql</code> for the bulk path, once in <code>engine/true_cost.py</code> so the service can recompute a cost without a round trip and so the logic can be unit tested. Duplication is a real risk, and it is managed rather than tolerated: the tests pin both implementations to the same worked examples, and the same numbers appear in this document. If they diverge, the build fails.</p>
+
+    <h3>The pipeline is code, and it is reviewed like code</h3>
+    <p>Every SQL file is dry-run against real BigQuery on every pull request, which catches schema drift and syntax errors before they can reach a morning run. Cloud Run deploys land with no traffic, get a health check, and are only then promoted. The engine's git SHA and a hash of the active rule set are written onto every recommendation row, so any past recommendation can be reproduced exactly, which is the difference between an audit trail and a list of assertions.</p>
+
+    <h3>Security posture</h3>
+    <ul class="tight">
+      <li>Credentials live in Secret Manager, fetched at runtime, one secret per source, granted only to the collector.</li>
+      <li>The Workspace identity behind Apps Script has <em>no</em> BigQuery write grant at all. Every write from the Sheets layer goes through the pricing service, so it lands in the audit trail with the human's identity attached.</li>
+      <li>Analysts see the mart, not the raw layer; raw payloads can contain contractual content that should not spread.</li>
+      <li>Workload Identity Federation for CI. No service account keys in GitHub.</li>
+      <li>The decision table has no <code>UPDATE</code> grant for anyone, including the service that writes it.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================== 6 -->
+<section id="dash">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <div>
+        <h2>Dashboard design</h2>
+        <p class="sub">Six pages in an Apps Script web app, not a BI report. The daily review is a workflow, so the decision sits two clicks from the evidence.</p>
+      </div>
+    </div>
+
+    <div class="flag">
+      <span class="eyebrow">Why not Looker Studio</span>
+      A BI report can show an analyst that a price is wrong. It cannot let them fix it, cannot enforce the margin floor, cannot record who decided what on which evidence, and cannot refuse to pretend that six hour old data is current. All four of those are the platform, not decoration around it. The dashboard is therefore an Apps Script HTML Service app in the same Workspace tenancy the pricing team already signs into: one URL, no per-user setup, approvals in the table.
+    </div>
+
+    <div class="scroll">
+      <table class="t-prose">
+        <thead><tr><th>Page</th><th>Reads</th><th>Designed so that&hellip;</th></tr></thead>
+        <tbody>
+          <tr><td><b>Overview</b></td><td><code>v_exec_overview</code></td><td>the price index trend, with its target band, can be read in three seconds. Eight tiles carry routes, airlines, competitors, index, cheapest count, P1 actions, margin upside and coverage. Coverage gets its own chart rather than a second axis, because a coverage number hidden inside a price chart is one nobody looks at.</td></tr>
+          <tr><td><b>Daily review</b></td><td><code>v_daily_pricing_review</code></td><td>the analyst works top to bottom and stops when the value runs out. Approve, modify and reject sit on the row. Modify pre-fills the recommended price and states the policy floor; a reason is mandatory on modify and reject, enforced in the browser, again in Apps Script, and once more in the pricing service. Multi-select and bulk approve handle the routine half of a morning in one action.</td></tr>
+          <tr><td><b>Competitors</b></td><td><code>v_competitor_intelligence</code>, <code>v_competitor_movements</code>, <code>fact_mining_signal</code></td><td>a competitor changing strategy is visible before it shows up in conversion. Win rate over time, median price, major movements, and the anomalies the mining job flagged.</td></tr>
+          <tr><td><b>Airline fees</b></td><td><code>v_airline_fee_current</code>, <code>v_airline_fee_changes</code></td><td>the fee matrix becomes the reference the commercial team prints and keeps. Analyst and lead only: fee tables can carry contractual content.</td></tr>
+          <tr><td><b>Routes</b></td><td><code>v_route_analysis</code>, <code>route_elasticity</code></td><td>price and volume sit in two charts sharing a date axis, never one chart with two scales. The elasticity card always names its source, so a regional prior never looks as authoritative as two years of route history.</td></tr>
+          <tr><td><b>Opportunities &amp; audit</b></td><td><code>v_pricing_opportunities</code>, <code>v_decision_audit</code>, <code>v_engine_scorecard</code></td><td>the platform is held to account. Who decided what, on what benchmark, with what reason, and what actually happened at T+7. Acceptance rate and override magnitude are on this page on purpose.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <h3>Three properties that matter more than the charts</h3>
+        <ul class="tight">
+          <li><b>The app holds no BigQuery write grant at all.</b> Approvals post to the pricing service carrying the signed-in user&rsquo;s identity, and the service appends to the decision log. The dashboard is an interface; the service is the system of record.</li>
+          <li><b>It executes as a service identity, not as the viewer.</b> That is what lets analysts read the mart without each of them holding a warehouse role. Authorisation is then done per request against Workspace groups, so removing somebody from a group takes effect on their next page load.</li>
+          <li><b>Every query is parameter bound and byte capped.</b> The only strings concatenated into SQL are the project id and identifiers checked against a regex. A runaway query fails rather than bills.</li>
+        </ul>
+        <p>Caching makes the economics work: collection is hourly, so a fifteen minute cache costs nothing in freshness and takes most page loads to zero queries. Approving anything invalidates the review cache immediately, so a decision never appears to have been ignored.</p>
+      </div>
+      <div>
+        <h3>Chart rules, held throughout</h3>
+        <ul class="tight">
+          <li>One y-axis per chart, always. Two measures of different scale get two charts.</li>
+          <li>Series colours come from a separate ramp validated for colour vision deficiency, not from the brand chrome. Worst adjacent pair separation is &Delta;E 13.5 under protanopia.</li>
+          <li>Colour follows the entity, assigned once, so filtering a competitor out never repaints the survivors.</li>
+          <li>Status is always a chip that says <code>UNCOMPETITIVE</code>, never a coloured square. Roughly one man in twelve reading this page will not distinguish red from green.</li>
+          <li>Every chart is backed by a table on the same page, and a chart that fails to draw degrades to a line of text pointing at it.</li>
+        </ul>
+        <p>A freshness banner sits in the header and turns amber past three hours. A dashboard that hides stale data is worse than no dashboard.</p>
+      </div>
+    </div>
+
+    <div class="note"><strong>The scorecard is the page that decides the platform&rsquo;s future.</strong> If forecast and realised impact do not converge over the first quarter, the elasticity estimates need work and nobody should be trusting the revenue impact column, least of all in a board pack. Building it late, or not at all, is the most common way a pricing platform quietly stops being believed.</div>
+  </div>
+</section>
+
+<!-- ================================================== 7 -->
+<section id="auto">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">07</span>
+      <div>
+        <h2>Automation workflow</h2>
+        <p class="sub">The daily cadence, in Africa/Lagos time, written so the schedule reads the way the pricing team thinks about their day.</p>
+      </div>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Time</th><th>Job</th><th>Runs on</th><th>Fails how</th></tr></thead>
+        <tbody>
+          <tr><td>hourly</td><td>T1 sweep &middot; 40 highest-revenue routes</td><td>Scheduler &rarr; Cloud Run</td><td>Retries 3&times;, one source failing never fails the run</td></tr>
+          <tr><td>every 4h</td><td>T2 sweep</td><td>Scheduler &rarr; Cloud Run</td><td>Same</td></tr>
+          <tr><td>03:00</td><td>T3 long-tail sweep</td><td>Scheduler &rarr; Cloud Run</td><td>Same</td></tr>
+          <tr><td>05:30</td><td>raw &rarr; fact_offer &rarr; market_snapshot</td><td>Pricing service</td><td>Idempotent MERGE, safe to rerun a window</td></tr>
+          <tr><td>06:00</td><td>Model refresh (weekdays)</td><td>BigQuery ML</td><td>Previous model stays live on failure</td></tr>
+          <tr><td>06:15</td><td>Recommendations written</td><td>Pricing service</td><td>Alerts if cells scored drops &gt;30% vs 7-day mean</td></tr>
+          <tr><td>06:45</td><td>Daily Review sheet populated</td><td>Apps Script trigger</td><td>Sheet shows last successful pull time</td></tr>
+          <tr><td>07:00</td><td>Gmail digest to the pricing team</td><td>Apps Script trigger</td><td>Sends a "no data" notice rather than silence</td></tr>
+          <tr><td>through the day</td><td>Approve, modify, reject</td><td>Sheets &rarr; pricing service</td><td>Per-row, partial success reported back into the sheet</td></tr>
+          <tr><td>18:00</td><td>Outcome measurement at T+7 and T+30</td><td>Pricing service</td><td>Backfills, catches up after an outage</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Why Google Sheets is the approval surface</h3>
+    <p>Because the pricing team already lives there, and an approval workflow people avoid is worse than no workflow. The Sheet holds the routes, the rules and the competitor panel, with validation on entry: a route key that is not <code>LOS-LHR</code> shaped is rejected, a target margin below the floor is rejected, and a daily move cap above 25% is rejected without commercial sign-off. Every sync is logged with the editor's identity.</p>
+    <p>The important architectural point is what the Sheet is <em>not</em> allowed to do. It cannot write to BigQuery. Approvals post to the pricing service, which validates them, refuses any price below the policy floor even when a human typed it, freezes the market evidence onto the record, and appends to the decision log. The Sheet is an interface. The service is the system of record.</p>
+
+    <h3>The 07:00 email</h3>
+    <p>One HTML email: four headline figures, then recommended price changes ranked by expected margin impact, then airline fee changes from the last day, then major competitor movements. It closes by saying plainly that these are recommendations and nothing changes until someone approves it in the sheet. An analyst who reads only the email should still know what their morning looks like.</p>
+  </div>
+</section>
+
+<!-- ================================================== 8 -->
+<section id="logic">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">08</span>
+      <div>
+        <h2>Pricing recommendation logic</h2>
+        <p class="sub">Eight steps, in order. The guards come first, because the most valuable thing this engine does is decline to have an opinion.</p>
+      </div>
+    </div>
+
+    <div class="scroll">
+      <table class="t-prose">
+        <thead><tr><th style="width:2ch">&nbsp;</th><th>Step</th><th>What happens</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td><b>Guard</b></td><td>Is this cell safe to act on? Blocks on: no own price, no supplier cost, fewer than three competitors, no market median, data older than twelve hours, dispersion above 0.6, or a cheapest competitor more than 30% below the second cheapest. That last one is an error, a mistake fare or a non-comparable product, and chasing it is how an OTA discounts itself for nothing.</td></tr>
+          <tr><td class="mono">2</td><td><b>Boundaries</b></td><td>Minimum price is the higher of cost over one-minus-the-margin-floor, and cost plus an absolute floor. Both are needed: on a &#8358;30,000 domestic net fare, 3.5% is about &#8358;1,090, which does not cover the cost of servicing the booking.</td></tr>
+          <tr><td class="mono">3</td><td><b>Target</b></td><td>A weighted blend of the market median and the cheapest comparable, weighted <em>by dispersion</em>: in a tight market shoppers compare like for like and the cheapest matters more; in a dispersed market the median is the better anchor. Then adjusted for our fee position, and reconciled against the margin target and the markup ceiling.</td></tr>
+          <tr><td class="mono">4</td><td><b>Constrain</b></td><td>Floor, daily move cap, increase and decrease caps, rounding to a publishable price, and suppression of moves too small to be worth the churn.</td></tr>
+          <tr><td class="mono">5</td><td><b>Classify</b></td><td>The five classes in section 04.</td></tr>
+          <tr><td class="mono">6</td><td><b>Quantify</b></td><td>Constant-elasticity volume response, damped to 70% of the modelled effect, then revenue and margin impact over the remaining selling window.</td></tr>
+          <tr><td class="mono">7</td><td><b>Value gate</b></td><td>If a cut's own impact model says it destroys margin, it is not a recommendation. The action becomes ESCALATE, the price does not move, and the rationale names the break-even elasticity. Tolerance is a config value, default zero, that a route defending share can deliberately open.</td></tr>
+          <tr><td class="mono">8</td><td><b>Score and explain</b></td><td>Confidence from six weighted components, priority from opportunity value times confidence, and a rationale in plain English.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>What the engine actually does, on seven real cells</h3>
+    <p>These are outputs from the code in this repository, not illustrations. Each row is a single call to <code>PricingEngine.recommend()</code>.</p>
+
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Scenario</th><th class="num">Current</th><th class="num">Floor</th><th class="num">Recommended</th>
+          <th class="num">Change</th><th>Class</th><th>Action</th><th class="num">Margin impact</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>Overpriced, healthy margin</td><td class="num">1,150,000</td><td class="num">880,829</td><td class="num">1,058,000</td><td class="num">&minus;8.0%</td><td><span class="chip c-alert">UNCOMPETITIVE</span></td><td>DECREASE</td><td class="num">+151,402</td></tr>
+          <tr><td>Overpriced, razor margin</td><td class="num">1,150,000</td><td class="num">1,119,171</td><td class="num">1,150,000</td><td class="num">&mdash;</td><td><span class="chip c-mute">PROTECTED</span></td><td>ESCALATE</td><td class="num">&mdash;</td></tr>
+          <tr><td>Underpriced, margin room</td><td class="num">880,000</td><td class="num">808,290</td><td class="num">940,600</td><td class="num">+6.9%</td><td><span class="chip c-good">MARGIN_OPP</span></td><td>INCREASE</td><td class="num">+1,414,159</td></tr>
+          <tr><td>Bag advantage vs cheapest</td><td class="num">1,050,000</td><td class="num">808,290</td><td class="num">975,000</td><td class="num">&minus;7.1%</td><td><span class="chip c-warn">WATCH</span></td><td>DECREASE</td><td class="num">+85,915</td></tr>
+          <tr><td>Competitor below our cost</td><td class="num">1,050,000</td><td class="num">932,642</td><td class="num">1,050,000</td><td class="num">&mdash;</td><td><span class="chip c-mute">PROTECTED</span></td><td>ESCALATE</td><td class="num">&mdash;</td></tr>
+          <tr><td>Only one competitor seen</td><td class="num">1,050,000</td><td class="num">932,642</td><td class="num">1,050,000</td><td class="num">&mdash;</td><td><span class="chip c-warn">WATCH</span></td><td>INVESTIGATE</td><td class="num">&mdash;</td></tr>
+          <tr><td>Outlier cheapest, 33% below rest</td><td class="num">1,050,000</td><td class="num">932,642</td><td class="num">1,050,000</td><td class="num">&mdash;</td><td><span class="chip c-warn">WATCH</span></td><td>INVESTIGATE</td><td class="num">&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Four of the seven produce no price change, and that is the point. A pricing platform that recommends a move on every row is not analysing the market, it is reacting to it, and the analyst learns to ignore it within a fortnight.</p>
+
+    <h3>Confidence, and what it is for</h3>
+    <p>Six weighted components: data quality (0.20), panel coverage (0.25), freshness (0.15), fee certainty (0.20), model quality (0.10) and market stability (0.10). Coverage carries the most weight because it is the assumption most often violated and least often noticed. Stability falls when the cheapest competitor moved sharply yesterday, on the reasonable view that a market in motion is a market we understand less well today than we did last week.</p>
+    <p>Confidence is not decoration. It multiplies into the priority score, it gates the P1 band, and it will eventually gate auto-application. Publishing a number the analyst cannot act on differently is worse than publishing nothing.</p>
+
+    <h3>Human approval and the audit trail</h3>
+    <p>Every decision writes: price before, price recommended, price approved, approver identity, timestamp, a frozen copy of the competitor benchmark, expected margin, confidence, and later the actual outcome at T+7 and T+30. A modification or rejection requires a reason, enforced in the interface and again in the service.</p>
+    <p>An analyst may override the engine. An analyst may not override the margin floor: the service returns a 422 naming both prices and pointing at the rule in the config sheet. That is the correct place to argue about a floor, in a versioned, reviewed rule, rather than one booking at a time.</p>
+    <p>Override magnitude is itself a tracked metric. Consistently large overrides in one direction mean the rules are wrong, not that the analyst is wrong, and the scorecard is built to surface that rather than to defend the engine.</p>
+  </div>
+</section>
+
+<!-- ================================================== 9 -->
+<section id="road">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-num">09</span>
+      <div>
+        <h2>Implementation roadmap</h2>
+        <p class="sub">Sequenced so that something is useful in week four and nothing is built on data that has not yet proved it exists.</p>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="when"><b>Phase 0</b>Weeks 1&ndash;2</div>
+      <div class="body">
+        <p><b>Foundation and a hard look at our own data.</b></p>
+        <ul>
+          <li>GCP project, IAM, Secret Manager, Artifact Registry, GitHub with WIF.</li>
+          <li>Datasets and DDL applied; CI dry-running SQL on every PR.</li>
+          <li>Our own PSS and mid-office landed into <code>raw.own_transaction</code>.</li>
+          <li>Agree one margin definition with Finance, in writing.</li>
+        </ul>
+        <p>The risk this phase exists to find: whether supplier cost is reliably available per booking. If it is not, the entire margin side of the platform is unbuildable and it is far better to know in week two.</p>
+      </div>
+      <div class="out"><b>Exit criteria</b>90 days of our own transactions in BigQuery, margin reconciling to the management accounts within 1%.</div>
+    </div>
+
+    <div class="phase">
+      <div class="when"><b>Phase 1</b>Weeks 3&ndash;6</div>
+      <div class="body">
+        <p><b>Collection and the first honest market view.</b></p>
+        <ul>
+          <li>Collector service, GDS and NDC adapters, 40 tier&nbsp;1 routes.</li>
+          <li><code>fact_offer</code> and <code>fact_market_snapshot</code> transforms.</li>
+          <li>Fee catalogue seeded, manually where necessary.</li>
+          <li>Apps Script dashboard shell live with the overview and route pages.</li>
+        </ul>
+      </div>
+      <div class="out"><b>Exit criteria</b>Price index computable daily on 40 routes with coverage above 0.7. First real answer to "are we cheaper or dearer".</div>
+    </div>
+
+    <div class="phase">
+      <div class="when"><b>Phase 2</b>Weeks 7&ndash;10</div>
+      <div class="body">
+        <p><b>Competitor panel and true customer cost.</b></p>
+        <ul>
+          <li>Licensed feed contracted and integrated.</li>
+          <li>True cost model live; fee intelligence page shipped.</li>
+          <li>Competitor and fee pages shipped; permitted-public tier reviewed by Legal and switched on only where the register allows.</li>
+        </ul>
+        <p>Expect the uncomfortable finding here: a set of routes where we believed we were competitive on headline and are not on true cost, and another set where the reverse is true. Both are worth money.</p>
+      </div>
+      <div class="out"><b>Exit criteria</b>At least 4 comparable sellers on 80% of tier&nbsp;1 cells. Fee catalogue covering 90% of observed carrier and route combinations.</div>
+    </div>
+
+    <div class="phase">
+      <div class="when"><b>Phase 3</b>Weeks 11&ndash;15</div>
+      <div class="body">
+        <p><b>The engine, in advisory mode.</b></p>
+        <ul>
+          <li>Pricing rules in Sheets, synced and validated.</li>
+          <li>Recommendation engine live with the default elasticity prior.</li>
+          <li>Daily review page with in-place approvals, audit trail, 07:00 digest.</li>
+          <li>Nightly mining job: anomalies, regime shifts, coverage gaps, fee moves.</li>
+        </ul>
+        <p>Run in shadow for the first two weeks: produce recommendations, take no action, and compare them with what the analysts did anyway. Disagreements are the fastest available calibration of the rules.</p>
+      </div>
+      <div class="out"><b>Exit criteria</b>Analysts working the sheet daily. Acceptance rate above 60%. Every price change carrying an audit record.</div>
+    </div>
+
+    <div class="phase">
+      <div class="when"><b>Phase 4</b>Weeks 16&ndash;22</div>
+      <div class="body">
+        <p><b>Learning from outcomes.</b></p>
+        <ul>
+          <li>Outcome measurement at T+7 and T+30; the engine scorecard page.</li>
+          <li>Route-level share elasticity, shrunk toward a regional prior.</li>
+          <li>Demand forecast feeding expected volume.</li>
+          <li>Deliberate price tests on a small route set, because passive drift is a poor source of elasticity.</li>
+        </ul>
+      </div>
+      <div class="out"><b>Exit criteria</b>Forecast margin impact within &plusmn;30% of realised on tier&nbsp;1 routes. Route elasticity available for the top 20 routes.</div>
+    </div>
+
+    <div class="phase">
+      <div class="when"><b>Phase 5</b>Weeks 23&ndash;30</div>
+      <div class="body">
+        <p><b>Earned automation, and scale.</b></p>
+        <ul>
+          <li>Auto-apply enabled only for changes under 2% with confidence above 0.85, on routes with a proven forecast record, with a daily cap and a one-click rollback.</li>
+          <li>Tier&nbsp;2 and tier&nbsp;3 routes to the full 150.</li>
+          <li>Business cabin and round trip.</li>
+          <li>Supplier negotiation pack generated from the PROTECTED backlog, which by now is a specific, evidenced list of where our cost base is the problem.</li>
+        </ul>
+      </div>
+      <div class="out"><b>Exit criteria</b>Auto-applied changes showing no worse realised margin than human-approved ones over 60 days.</div>
+    </div>
+
+    <h3>What would make this fail</h3>
+    <div class="scroll">
+      <table class="t-prose">
+        <thead><tr><th>Risk</th><th>How it shows up</th><th>Mitigation already in the design</th></tr></thead>
+        <tbody>
+          <tr><td>Supplier cost is unreliable per booking</td><td>Margin figures that Finance will not sign off</td><td>Phase 0 exists to find this before anything is built on it</td></tr>
+          <tr><td>Thin competitor panel on secondary routes</td><td>Confident recommendations from two data points</td><td>Coverage score, a hard three-seller minimum, INVESTIGATE rather than a guess</td></tr>
+          <tr><td>Ancillary data stays sparse</td><td>True cost quietly reverting to headline comparison</td><td>Fee confidence flows into recommendation confidence and demotes the row</td></tr>
+          <tr><td>Elasticity estimated from too little data</td><td>Revenue impact figures nobody should believe</td><td>Shrinkage to a regional prior, elasticity source shown on every route card, scorecard measures forecast error in public</td></tr>
+          <tr><td>Analysts ignore the tool</td><td>Acceptance rate near zero, sheet untouched by week three</td><td>Approval in Sheets where they already work, rationale on every row, sorted by money not by percentage</td></tr>
+          <tr><td>A licensed feed's terms change</td><td>A commercial dispute nobody saw coming</td><td>Legal basis on every row, source register reviewed quarterly, collection stops automatically at 90 days</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap col">
+    <p>Design revision 1.0. The accompanying repository contains the BigQuery DDL and transforms, the collector and pricing services, the pricing engine, the Apps Script workspace layer, the dashboard specification, the deployment scripts and 92 passing tests. Figures in section 04 and the scenario table in section 08 are generated from that code, not written by hand. The dashboard palette was validated with a colour-vision and contrast checker rather than chosen by eye.</p>
+  </div>
+</footer>
