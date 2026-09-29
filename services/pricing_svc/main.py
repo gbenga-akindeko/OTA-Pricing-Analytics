@@ -119,7 +119,11 @@ def load_cells(review_date: date) -> list[dict]:
     LEFT JOIN demand d ON d.series_id = CONCAT(l.route_key, '|', l.cabin)
     LEFT JOIN {elasticity_source()} e
            ON e.route_key = l.route_key AND e.cabin = l.cabin
-    LEFT JOIN fees f USING (route_key, departure_date, cabin)
+    -- Explicit ON, not USING: once e and r are joined, route_key exists on
+    -- more than one table to the left and BigQuery rejects USING as ambiguous.
+    LEFT JOIN fees f
+           ON f.route_key = l.route_key AND f.departure_date = l.departure_date
+          AND f.cabin = l.cabin
     LEFT JOIN `{PROJECT}.tvd_fareiq_mart.dim_route` r ON r.route_key = l.route_key
     LEFT JOIN (
       SELECT route_key, departure_date, cabin,
@@ -127,7 +131,8 @@ def load_cells(review_date: date) -> list[dict]:
       FROM `{PROJECT}.tvd_fareiq_mart.fact_offer`
       WHERE DATE(collected_at) = @review_date AND is_our_offer
       GROUP BY 1,2,3
-    ) c USING (route_key, departure_date, cabin)
+    ) c ON c.route_key = l.route_key AND c.departure_date = l.departure_date
+         AND c.cabin = l.cabin
     WHERE l.our_comparable_cost IS NOT NULL
     """
     job = bq.query(sql, job_config=bigquery.QueryJobConfig(
