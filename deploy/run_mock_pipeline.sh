@@ -13,6 +13,13 @@
 #   bash deploy/run_mock_pipeline.sh --apply       ...and write the recommendations
 #   bash deploy/run_mock_pipeline.sh --schedule    ...and keep it running on Cloud Scheduler
 #   bash deploy/run_mock_pipeline.sh --skip-collect --apply   reuse data already loaded
+#   bash deploy/run_mock_pipeline.sh --seed-bookings          ...and fake our own bookings
+#
+# --seed-bookings writes one synthetic ticketed booking per market cell, with a
+# supplier cost of 90.5% of our mock price (the mock's own convention). The
+# engine refuses to move a price without a supplier cost, and that only comes
+# from fact_booking, so without it every cell reports INVESTIGATE. The rows
+# carry channel 'MOCK' and booking references starting 'MOCK-'.
 #
 # Overrides (environment)
 #   GCP_PROJECT     default tvd-fareiq-prod
@@ -23,7 +30,8 @@
 #   WINDOW_HOURS    default 72
 #
 # Everything the mock writes carries source_id 'mock_market' and seller ids
-# starting 'mock_'. docs/STEP_BY_STEP.md Part 11.1 deletes all of it.
+# starting 'mock_'; seeded bookings carry channel 'MOCK'.
+# docs/STEP_BY_STEP.md Part 11.1 deletes all of it.
 set -euo pipefail
 
 PROJECT="${GCP_PROJECT:-tvd-fareiq-prod}"
@@ -37,13 +45,14 @@ HORIZONS="${HORIZONS:-1,3,7,14,21,30,45,60,90}"
 CABINS="${CABINS:-\"ECONOMY\",\"BUSINESS\"}"
 WINDOW_HOURS="${WINDOW_HOURS:-72}"
 
-APPLY=0; SCHEDULE=0; COLLECT=1
+APPLY=0; SCHEDULE=0; COLLECT=1; SEED=0
 for arg in "$@"; do
   case "$arg" in
     --apply)        APPLY=1 ;;
     --schedule)     SCHEDULE=1 ;;
     --skip-collect) COLLECT=0 ;;
-    -h|--help)      sed -n '2,27p' "$0"; exit 0 ;;
+    --seed-bookings) SEED=1 ;;
+    -h|--help)      sed -n '2,34p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -93,6 +102,16 @@ bqrow() {
     return 1
   fi
   printf '%s\n' "$out" | tail -n 1
+}
+
+# Run a statement where only success matters (DML, DDL).
+bqexec() {
+  local out
+  if ! out="$(bq --quiet --project_id="$PROJECT" --location="$REGION" \
+                query --use_legacy_sql=false "$1" 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    return 1
+  fi
 }
 
 svc_url() {
@@ -152,6 +171,54 @@ else
 fi
 
 # ----------------------------------------------------------------------------
+if [[ "$SEED" == "1" ]]; then
+  say "Seeding synthetic bookings (supplier cost for our mock offers)"
+  # fact_offer must hold this window's offers before bookings can be derived
+  # from them, so run the transform once first. It is idempotent.
+  post "$PRICING_URL/transform" "{\"window_hours\":${WINDOW_HOURS}}" >/dev/null \
+    || die "Transform failed before seeding (response above)."
+  bqexec "
+    MERGE \`${PROJECT}.tvd_fareiq_mart.fact_booking\` T
+    USING (
+      SELECT
+        TO_HEX(SHA256(CONCAT('mock|', route_key, '|', CAST(departure_date AS STRING), '|', cabin, '|', pos_country))) AS booking_sk,
+        CURRENT_TIMESTAMP() AS booked_at,
+        CURRENT_DATE() AS booking_date,
+        route_key, departure_date,
+        DATE_DIFF(departure_date, CURRENT_DATE(), DAY) AS booking_lead_days,
+        cabin, marketing_carrier, fare_family, pos_country,
+        CAST(ROUND(price * 0.905) AS NUMERIC) AS supplier_cost_base,
+        price AS selling_price_base
+      FROM (
+        SELECT route_key, departure_date, cabin, pos_country,
+               ANY_VALUE(marketing_carrier) AS marketing_carrier,
+               ANY_VALUE(fare_family) AS fare_family,
+               MIN(displayed_total_base) AS price
+        FROM \`${PROJECT}.tvd_fareiq_mart.fact_offer\`
+        WHERE collected_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${WINDOW_HOURS} HOUR)
+          AND source_id = 'mock_market' AND is_our_offer
+        GROUP BY 1, 2, 3, 4
+      )
+    ) S
+    ON T.booking_sk = S.booking_sk AND T.booking_date = S.booking_date
+    WHEN NOT MATCHED THEN INSERT
+      (booking_sk, booking_reference, booked_at, booking_date, route_key, departure_date,
+       booking_lead_days, cabin, marketing_carrier, fare_family, channel, customer_segment,
+       pos_country, pax_count, supplier_cost_base, selling_price_base, markup_base,
+       gross_margin_base, gross_margin_pct, status)
+    VALUES
+      (S.booking_sk, CONCAT('MOCK-', SUBSTR(S.booking_sk, 1, 12)), S.booked_at, S.booking_date,
+       S.route_key, S.departure_date, S.booking_lead_days, S.cabin, S.marketing_carrier,
+       S.fare_family, 'MOCK', 'MOCK', S.pos_country, 1, S.supplier_cost_base,
+       S.selling_price_base, S.selling_price_base - S.supplier_cost_base,
+       S.selling_price_base - S.supplier_cost_base,
+       SAFE_DIVIDE(S.selling_price_base - S.supplier_cost_base, S.selling_price_base),
+       'TICKETED')" || die "Could not seed synthetic bookings (error above)."
+  booked="$(bqrow "SELECT COUNT(*) FROM \`${PROJECT}.tvd_fareiq_mart.fact_booking\` WHERE booking_date = CURRENT_DATE() AND channel = 'MOCK'")"
+  ok "$booked synthetic booking(s) for today (channel 'MOCK')"
+fi
+
+# ----------------------------------------------------------------------------
 say "Transform: raw -> fact_offer -> fact_market_snapshot (last ${WINDOW_HOURS}h)"
 post "$PRICING_URL/transform" "{\"window_hours\":${WINDOW_HOURS}}" >/dev/null \
   || die "Transform failed (response above). Logs: gcloud run services logs read $PRICING_SVC --region=$REGION --limit=40"
@@ -174,6 +241,13 @@ IFS=, read -r ms_cells ms_ours <<<"$(bqrow "
   FROM \`${PROJECT}.tvd_fareiq_mart.fact_market_snapshot\`
   WHERE snapshot_date = CURRENT_DATE()")"
 printf '    fact_market_snapshot today: %s cells, %s with our own price\n' "$ms_cells" "$ms_ours"
+ms_cost="$(bqrow "SELECT COUNTIF(our_supplier_cost IS NOT NULL) FROM \`${PROJECT}.tvd_fareiq_mart.fact_market_snapshot\` WHERE snapshot_date = CURRENT_DATE()")"
+if [[ "${ms_cost:-0}" -gt 0 ]]; then
+  ok "$ms_cost cell(s) carry a supplier cost"
+else
+  warn "No cell has a supplier cost, so every recommendation will be INVESTIGATE."
+  warn "Add --seed-bookings to fake our own bookings for the mock run."
+fi
 [[ "${ms_ours:-0}" -gt 0 ]] || die "No market cell for today carries our price, so /recommend has nothing to score."
 ok "market snapshot built"
 
@@ -253,6 +327,7 @@ fi
 
 say "Done"
 cat <<EOF
-    Everything written today is synthetic (source_id 'mock_market', sellers 'mock_*').
+    Everything written today is synthetic (source_id 'mock_market', sellers 'mock_*',
+    bookings with channel 'MOCK').
     Before go-live, run the clean-up in docs/STEP_BY_STEP.md Part 11.1.
 EOF

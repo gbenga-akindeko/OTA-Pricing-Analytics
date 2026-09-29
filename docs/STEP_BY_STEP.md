@@ -1152,7 +1152,8 @@ bq query --use_legacy_sql=false \
  DELETE FROM \`$GCP_PROJECT.tvd_fareiq_mart.fact_offer\` WHERE source_id = 'mock_market';
  DELETE FROM \`$GCP_PROJECT.tvd_fareiq_mart.fact_market_snapshot\` WHERE snapshot_date < CURRENT_DATE();
  DELETE FROM \`$GCP_PROJECT.tvd_fareiq_mart.fact_price_recommendation\` WHERE review_date < CURRENT_DATE();
- DELETE FROM \`$GCP_PROJECT.tvd_fareiq_mart.dim_seller\` WHERE seller_id LIKE 'mock_%';"
+ DELETE FROM \`$GCP_PROJECT.tvd_fareiq_mart.dim_seller\` WHERE seller_id LIKE 'mock_%';
+ DELETE FROM \`$GCP_PROJECT.tvd_fareiq_mart.fact_booking\` WHERE channel = 'MOCK';"
 ```
 
 Then verify nothing survived:

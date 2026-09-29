@@ -167,13 +167,44 @@ USING (
         AND h7.collection_window = TIMESTAMP_SUB(m.collection_window, INTERVAL 168 HOUR)
 ) S
 ON T.market_sk = S.market_sk AND T.snapshot_date = S.snapshot_date
+-- A rerun refreshes every computed column. Late-arriving inputs (a booking
+-- that supplies our supplier cost, a corrected fee) must reach cells that
+-- already exist, not only new ones.
 WHEN MATCHED THEN UPDATE SET
+  days_to_departure = S.days_to_departure,
+  dtd_bucket = S.dtd_bucket,
+  sellers_observed = S.sellers_observed,
+  competitor_sellers = S.competitor_sellers,
+  offers_observed = S.offers_observed,
+  carriers_observed = S.carriers_observed,
+  coverage_score = S.coverage_score,
+  cheapest_competitor_id = S.cheapest_competitor_id,
+  cheapest_competitor_price = S.cheapest_competitor_price,
+  second_cheapest_price = S.second_cheapest_price,
+  market_min = S.market_min,
+  market_p25 = S.market_p25,
+  market_median = S.market_median,
+  market_mean = S.market_mean,
+  market_weighted_mean = S.market_weighted_mean,
+  market_p75 = S.market_p75,
+  market_max = S.market_max,
+  market_stddev = S.market_stddev,
+  market_dispersion = S.market_dispersion,
+  our_seller_id = S.our_seller_id,
+  our_displayed_total = S.our_displayed_total,
+  our_true_cost = S.our_true_cost,
   our_comparable_cost = S.our_comparable_cost,
+  our_market_rank = S.our_market_rank,
   price_gap_abs = S.price_gap_abs,
   price_gap_pct = S.price_gap_pct,
   price_index_vs_median = S.price_index_vs_median,
   price_index_vs_cheapest = S.price_index_vs_cheapest,
-  our_market_rank = S.our_market_rank,
-  coverage_score = S.coverage_score,
+  our_supplier_cost = S.our_supplier_cost,
+  our_gross_margin_abs = S.our_gross_margin_abs,
+  our_gross_margin_pct = S.our_gross_margin_pct,
+  median_change_1d_pct = S.median_change_1d_pct,
+  median_change_7d_pct = S.median_change_7d_pct,
+  cheapest_change_1d_pct = S.cheapest_change_1d_pct,
+  our_index_change_7d = S.our_index_change_7d,
   computed_at = S.computed_at
 WHEN NOT MATCHED THEN INSERT ROW;
