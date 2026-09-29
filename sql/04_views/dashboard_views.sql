@@ -14,6 +14,8 @@ WITH latest AS (
 recs AS (
   SELECT * FROM `${PROJECT}.tvd_fareiq_mart.fact_price_recommendation`
   WHERE review_date = CURRENT_DATE()
+  -- latest engine run only, so a rerun does not double the counts
+  QUALIFY generated_at = MAX(generated_at) OVER ()
 )
 SELECT
   CURRENT_DATE()                                              AS review_date,
@@ -76,7 +78,11 @@ FROM `${PROJECT}.tvd_fareiq_mart.fact_price_recommendation` r
 LEFT JOIN `${PROJECT}.tvd_fareiq_mart.fact_market_snapshot` ms ON ms.market_sk = r.market_sk
 LEFT JOIN `${PROJECT}.tvd_fareiq_mart.dim_route` dr           ON dr.route_key = r.route_key
 LEFT JOIN `${PROJECT}.tvd_fareiq_mart.dim_carrier` dc         ON dc.carrier_code = r.marketing_carrier
-WHERE r.review_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY);
+WHERE r.review_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+-- One engine run per review day. A manual rerun appends a fresh full set,
+-- and without this the review page lists every cell once per run. Earlier
+-- runs stay in fact_price_recommendation as evidence.
+QUALIFY r.generated_at = MAX(r.generated_at) OVER (PARTITION BY r.review_date);
 
 
 -- 3. COMPETITOR INTELLIGENCE ------------------------------------------
@@ -244,7 +250,8 @@ SELECT
   r.reason_codes, r.rationale, r.status
 FROM `${PROJECT}.tvd_fareiq_mart.fact_price_recommendation` r
 WHERE r.review_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-  AND r.action != 'HOLD';
+  AND r.action != 'HOLD'
+QUALIFY r.generated_at = MAX(r.generated_at) OVER (PARTITION BY r.review_date);
 
 
 -- 7. APPROVAL AUDIT AND ENGINE SCORECARD ------------------------------
