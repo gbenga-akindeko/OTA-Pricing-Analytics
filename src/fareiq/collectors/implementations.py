@@ -129,9 +129,13 @@ class AmadeusCollector(BaseCollector):
     rate_limit_per_minute = 40
 
     BASE = "https://api.amadeus.com"
+    TEST_BASE = "https://test.api.amadeus.com"   # self-service test keys only work here
 
     def __init__(self, collection_run_id: str, credentials: dict | None = None):
         super().__init__(collection_run_id, credentials)
+        # Put "base_url": "https://test.api.amadeus.com" in the secret while on
+        # test keys; drop it (or set the production host) at go-live.
+        self.base = ((self.credentials or {}).get("base_url") or self.BASE).rstrip("/")
         self._token: str | None = None
         self._token_expiry: datetime | None = None
 
@@ -140,7 +144,7 @@ class AmadeusCollector(BaseCollector):
         if self._token and self._token_expiry and now < self._token_expiry:
             return self._token
         resp = await client.post(
-            f"{self.BASE}/v1/security/oauth2/token",
+            f"{self.base}/v1/security/oauth2/token",
             data={"grant_type": "client_credentials",
                   "client_id": self.credentials["client_id"],
                   "client_secret": self.credentials["client_secret"]},
@@ -167,7 +171,7 @@ class AmadeusCollector(BaseCollector):
                 params["children"] = request.children
             if request.return_date:
                 params["returnDate"] = request.return_date.isoformat()
-            resp = await client.get(f"{self.BASE}/v2/shopping/flight-offers",
+            resp = await client.get(f"{self.base}/v2/shopping/flight-offers",
                                     params=params,
                                     headers={"Authorization": f"Bearer {token}"})
             _raise_for_status(resp, self.source_id)

@@ -294,7 +294,7 @@ function renderReview() {
          ? '<input type="checkbox" class="rowsel" data-i="' + i + '" aria-label="Select ' + esc(r.route_key) + '">'
          : ''),
       td(esc(r.route_key), 'route'),
-      td(r.trip_type === 'ROUND_TRIP' ? 'Return' : 'One way'),
+      td(({ ROUND_TRIP: 'Return', MULTI_CITY: 'Multi-city' })[r.trip_type] || 'One way'),
       td(esc(r.marketing_carrier || '—')),
       td(esc(r.departure_date || '')),
       td(fmtInt(r.days_to_departure), 'num'),

@@ -274,7 +274,7 @@ function submitDecisions() {
 function sendMorningDigest() {
   const exec = runQuery_('SELECT * FROM `' + CONFIG.PROJECT_ID + '.tvd_fareiq_mart.v_exec_overview`');
   const top = runQuery_(
-    'SELECT route_key, IF(trip_type = "ROUND_TRIP", "Return", "One way") AS trip, ' +
+    'SELECT route_key, IF(trip_type = "ROUND_TRIP", "Return", IF(trip_type = "MULTI_CITY", "Multi-city", "One way")) AS trip, ' +
     '       departure_date, cabin, action, priority, our_price, ' +
     '       cheapest_competitor_price, price_index, recommended_price, ' +
     '       expected_margin_impact, confidence, rationale ' +

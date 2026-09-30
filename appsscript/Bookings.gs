@@ -71,7 +71,8 @@ function syncBookingsToFareIQ() {
       booking_reference: String(v[c.pnr] || id).trim(),
       booking_date: Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
       route_key: od.route_key,
-      trip_type: od.round_trip ? 'ROUND_TRIP' : 'ONE_WAY',
+      trip_type: od.trip_type,
+      itinerary: od.itinerary,
       cabin: String(v[c.cabin] || 'ECONOMY').trim().toUpperCase().replace(/\s+/g, '_'),
       marketing_carrier: String(v[c.airline] || '').trim().toUpperCase() || null,
       channel: String(v[c.issuedFrom] || '').trim().toUpperCase() || null,
@@ -94,7 +95,8 @@ function syncBookingsToFareIQ() {
       schema: { fields: [
         { name: 'booking_sk', type: 'STRING' }, { name: 'booking_reference', type: 'STRING' },
         { name: 'booking_date', type: 'DATE' }, { name: 'route_key', type: 'STRING' },
-        { name: 'trip_type', type: 'STRING' }, { name: 'cabin', type: 'STRING' },
+        { name: 'trip_type', type: 'STRING' }, { name: 'itinerary', type: 'STRING' },
+        { name: 'cabin', type: 'STRING' },
         { name: 'marketing_carrier', type: 'STRING' }, { name: 'channel', type: 'STRING' },
         { name: 'customer_segment', type: 'STRING' },
         { name: 'supplier_cost_base', type: 'NUMERIC' },
@@ -118,16 +120,17 @@ function syncBookingsToFareIQ() {
     'WHEN MATCHED THEN UPDATE SET ' +
     '  booking_reference = S.booking_reference, booked_at = TIMESTAMP(S.booking_date), ' +
     '  booking_date = S.booking_date, route_key = S.route_key, cabin = S.cabin, ' +
+    '  trip_type = S.trip_type, itinerary = S.itinerary, ' +
     '  marketing_carrier = S.marketing_carrier, channel = S.channel, ' +
     '  customer_segment = S.customer_segment, supplier_cost_base = S.supplier_cost_base, ' +
     '  selling_price_base = S.selling_price_base, gross_margin_base = S.gross_margin_base, ' +
     '  gross_margin_pct = SAFE_DIVIDE(S.gross_margin_base, S.selling_price_base) ' +
     'WHEN NOT MATCHED THEN INSERT (booking_sk, booking_reference, booked_at, booking_date, ' +
-    '  route_key, departure_date, booking_lead_days, cabin, marketing_carrier, channel, ' +
+    '  route_key, trip_type, itinerary, departure_date, booking_lead_days, cabin, marketing_carrier, channel, ' +
     '  customer_segment, pos_country, pax_count, supplier_cost_base, selling_price_base, ' +
     '  gross_margin_base, gross_margin_pct, status) ' +
     'VALUES (S.booking_sk, S.booking_reference, TIMESTAMP(S.booking_date), S.booking_date, ' +
-    '  S.route_key, NULL, NULL, S.cabin, S.marketing_carrier, S.channel, S.customer_segment, ' +
+    '  S.route_key, S.trip_type, S.itinerary, NULL, NULL, S.cabin, S.marketing_carrier, S.channel, S.customer_segment, ' +
     "  'NG', 1, S.supplier_cost_base, S.selling_price_base, S.gross_margin_base, " +
     "  IFNULL(SAFE_DIVIDE(S.gross_margin_base, S.selling_price_base), 0), 'TICKETED') " +
     "WHEN NOT MATCHED BY SOURCE AND STARTS_WITH(T.booking_sk, '" + BOOKING_SYNC.KEY_PREFIX + "') " +

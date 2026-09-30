@@ -265,6 +265,8 @@ CREATE TABLE IF NOT EXISTS `${PROJECT}.tvd_fareiq_mart.fact_booking`
   booked_at          TIMESTAMP NOT NULL,
   booking_date       DATE      NOT NULL,
   route_key          STRING    NOT NULL,
+  trip_type          STRING             OPTIONS(description='ONE_WAY | ROUND_TRIP | MULTI_CITY, from the sold itinerary.'),
+  itinerary          STRING             OPTIONS(description='Every airport as sold, e.g. LOS-MED-JED-LOS.'),
   departure_date     DATE               OPTIONS(description='NULL when the source records only the issue date, as the TVD sales register does.'),
   booking_lead_days  INT64,
   cabin              STRING    NOT NULL,

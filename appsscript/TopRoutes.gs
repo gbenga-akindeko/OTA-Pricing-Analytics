@@ -110,12 +110,13 @@ function buildTopRoutes() {
     const k = od.route_key;
     const agg = routes[k] || (routes[k] = {
       route_key: k, origin: od.origin, destination: od.destination,
-      tickets: 0, net: 0, selling: 0, income: 0, round_trips: 0,
+      tickets: 0, net: 0, selling: 0, income: 0, round_trips: 0, multi_city: 0,
       issued: {}, airlines: {}, first: null, last: null,
     });
     agg.tickets++;
     agg.net += net;
     if (od.round_trip) agg.round_trips++;
+    if (od.trip_type === 'MULTI_CITY') agg.multi_city++;
     if (sellIdx >= 0) agg.selling += parseAmount_(row[sellIdx]) || 0;
     if (incIdx >= 0) agg.income += Number(String(row[incIdx]).replace(/[^0-9.\-]/g, '')) || 0;
     if (airIdx >= 0 && row[airIdx]) {
@@ -154,6 +155,7 @@ function buildTopRoutes() {
   const issuedHeader = issuedIsDate ? 'Issued between' : 'Issued from (top 3)';
   const header = ['Rank', 'Route', 'Origin', 'Destination', 'Tickets', 'Total net fare',
                   'Avg net fare', 'Share of net fare', 'Margin', 'Round trip share',
+                  'Multi-city share',
                   'Top airlines', issuedHeader];
   const rows = list.map(function (x, i) {
     let issued;
@@ -170,7 +172,8 @@ function buildTopRoutes() {
     return [i + 1, x.route_key, x.origin, x.destination, x.tickets, x.net,
             x.net / x.tickets, totalNet ? x.net / totalNet : 0,
             x.selling ? x.income / x.selling : '',
-            x.tickets ? x.round_trips / x.tickets : 0, airlines, issued];
+            x.tickets ? x.round_trips / x.tickets : 0,
+            x.tickets ? x.multi_city / x.tickets : 0, airlines, issued];
   });
 
   out.getRange(3, 1, 1, header.length).setValues([header])
@@ -178,7 +181,7 @@ function buildTopRoutes() {
   if (rows.length) {
     out.getRange(4, 1, rows.length, header.length).setValues(rows);
     out.getRange(4, 6, rows.length, 2).setNumberFormat('₦#,##0');
-    out.getRange(4, 8, rows.length, 3).setNumberFormat('0.0%');
+    out.getRange(4, 8, rows.length, 4).setNumberFormat('0.0%');
   }
   out.setFrozenRows(3);
   out.autoResizeColumns(1, header.length);
@@ -197,20 +200,34 @@ function buildTopRoutes() {
 
 /**
  * Turn an itinerary like "LOS-LHR-LOS", "LOS/IST/LHR" or "LOS LHR" into an
- * origin and destination. A round trip returns to its origin, and its
- * destination is the turnaround point in the middle of the journey. A one way
- * journey's destination is its last airport.
+ * origin, a destination and a trip type:
+ *
+ *   ROUND_TRIP  returns to its origin by retracing its path: LOS-LHR-LOS,
+ *               LOS-IST-LHR-IST-LOS. Destination is the turnaround point.
+ *   MULTI_CITY  returns to its origin by a different path: LOS-MED-JED-LOS,
+ *               LOS-YYZ-LHR-LOS. Destination is the first stop after origin's
+ *               midpoint, the same turnaround rule, and the full itinerary is
+ *               kept so the journey can be priced as sold.
+ *   ONE_WAY     ends somewhere else. Destination is the last airport.
+ *
+ * The register lists connections and stopovers alike, so a round trip that
+ * connects through different hubs each way reads as MULTI_CITY. That is the
+ * safer error: it keeps it out of the like-for-like round trip market.
  */
 function parseItinerary_(text) {
   const codes = (String(text).toUpperCase().match(/\b[A-Z]{3}\b/g) || [])
     .filter(function (c) { return NOT_AIRPORTS.indexOf(c) < 0; });
   if (codes.length < 2) return null;
   const origin = codes[0];
-  const roundTrip = codes.length >= 3 && codes[codes.length - 1] === origin;
-  const destination = roundTrip ? codes[Math.floor((codes.length - 1) / 2)] : codes[codes.length - 1];
+  const closed = codes.length >= 3 && codes[codes.length - 1] === origin;
+  const retraced = closed && codes.join('-') === codes.slice().reverse().join('-');
+  const tripType = !closed ? 'ONE_WAY' : (retraced ? 'ROUND_TRIP' : 'MULTI_CITY');
+  const destination = closed ? codes[Math.floor((codes.length - 1) / 2)] : codes[codes.length - 1];
   if (!destination || destination === origin) return null;
   return { origin: origin, destination: destination,
-           route_key: origin + '-' + destination, round_trip: roundTrip };
+           route_key: origin + '-' + destination,
+           trip_type: tripType, round_trip: tripType === 'ROUND_TRIP',
+           itinerary: codes.join('-') };
 }
 
 /** "₦1,234,500.00", "NGN 1234500", 1234500 -> 1234500. Blank or zero -> null. */
