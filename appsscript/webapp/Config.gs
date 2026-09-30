@@ -34,7 +34,7 @@ const CFG = {
   // Cost guards. A runaway query should fail, not bill.
   MAX_BYTES_BILLED: '2000000000',     // 2 GB per query
   QUERY_TIMEOUT_MS: 45000,
-  CACHE_SECONDS: 900,                 // 15 min; collection cadence is hourly
+  CACHE_SECONDS: 600,                 // 10 min; collection cadence is every 30 min
   CACHE_SECONDS_REVIEW: 120,          // the working page refreshes faster
   MAX_ROWS: 500,
 };

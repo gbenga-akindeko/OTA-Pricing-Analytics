@@ -16,7 +16,7 @@ SELECT
   r.source_id,
   r.source_tier,
   r.collected_at,
-  TIMESTAMP_TRUNC(r.collected_at, HOUR)                       AS collection_window,
+  TIMESTAMP_SECONDS(DIV(UNIX_SECONDS(r.collected_at), 1800) * 1800) AS collection_window,  -- 30 minute buckets
   CONCAT(r.request_origin, '-', r.request_destination)        AS route_key,
   dr.region_pair                                              AS region_pair,
   r.request_origin                                            AS origin,

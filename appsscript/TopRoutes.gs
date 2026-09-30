@@ -39,6 +39,10 @@ const TOP_ROUTES = {
   CHECK_DAYS_OUT: [14, 30],        // departure dates checked, days from today
   CHECK_STAY_DAYS: 14,             // return date for routes sold mostly as round trips
   CHECK_CABIN: 'ECONOMY',
+  // New routes management wants watched from day one. They have little or no
+  // sales history yet, so they would never make the top list on revenue.
+  // They are always added to the daily check, checked as round trips.
+  PRIORITY_ROUTES: ['LOS-LGW', 'LOS-IAD', 'LOS-ADD', 'PHC-LHR', 'LOS-KGL', 'PHC-LGW'],
   POS_COUNTRY: 'NG',
   CURRENCY: 'NGN',
 };
@@ -255,6 +259,12 @@ function buildCompetitorChecks() {
     // that is the price a customer compares.
     const rt = at('Round trip share') >= 0 ? Number(r[at('Round trip share')]) >= 0.5 : false;
     return [r[at('Route')], r[at('Origin')], r[at('Destination')], rt, r[at('Top airlines')] || ''];
+  });
+  const listed = routes.map(function (r) { return String(r[0]); });
+  TOP_ROUTES.PRIORITY_ROUTES.forEach(function (key) {
+    if (listed.indexOf(key) >= 0) return;
+    const od = key.split('-');
+    routes.push([key, od[0], od[1], true, 'new route']);
   });
 
   const sheet = getOrCreateSheet_(TOP_ROUTES.CHECK_TAB);

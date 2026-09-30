@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS `${PROJECT}.tvd_fareiq_mart.fact_offer`
   snapshot_id             STRING    NOT NULL OPTIONS(description='Lineage back to tvd_fareiq_raw.offer_snapshot.'),
   collection_run_id       STRING    NOT NULL,
   collected_at            TIMESTAMP NOT NULL,
-  collection_window       TIMESTAMP NOT NULL OPTIONS(description='collected_at truncated to the hour. Makes like for like comparison possible across sellers polled minutes apart.'),
+  collection_window       TIMESTAMP NOT NULL OPTIONS(description='collected_at rounded down to the half hour. Makes like for like comparison possible across sellers polled minutes apart.'),
 
   route_key               STRING    NOT NULL,
   origin                  STRING    NOT NULL,

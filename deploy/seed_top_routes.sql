@@ -1,7 +1,7 @@
 -- Monitored routes, from TravelDen's issued tickets (1 Jan to 28 Sep 2026),
--- ranked by naira net fare. The top eight go on the hourly tier (T1), the
--- next four on T2. Revenue figures stay in the transactions database; only
--- the route list lives here.
+-- ranked by naira net fare. The top eight go on T1 (every 30 minutes), the
+-- next four on T2. Six new routes are added on T1 by request. Revenue
+-- figures stay in the transactions database; only the route list lives here.
 --
 -- Apply with:
 --   sed 's/\${PROJECT}/tvd-fareiq-prod/g' deploy/seed_top_routes.sql \
@@ -28,7 +28,15 @@ USING (
     ('LOS', 'JFK', 'Lagos', 'New York',  'NG', 'US', 'AF_NORTHAM',   'LONG',   'T2', 9),
     ('LOS', 'IAH', 'Lagos', 'Houston',   'NG', 'US', 'AF_NORTHAM',   'LONG',   'T2', 10),
     ('LOS', 'DXB', 'Lagos', 'Dubai',     'NG', 'AE', 'AF_MIDEAST',   'LONG',   'T2', 11),
-    ('LOS', 'ABV', 'Lagos', 'Abuja',     'NG', 'NG', 'WAF_DOMESTIC', 'SHORT',  'T2', 12)
+    ('LOS', 'ABV', 'Lagos', 'Abuja',     'NG', 'NG', 'WAF_DOMESTIC', 'SHORT',  'T2', 12),
+    -- New routes management asked for. Too new to rank on sales, so they go
+    -- straight onto T1 and are watched every 30 minutes like the top eight.
+    ('LOS', 'LGW', 'Lagos', 'London Gatwick', 'NG', 'GB', 'AF_EUROPE', 'LONG',   'T1', 13),
+    ('LOS', 'IAD', 'Lagos', 'Washington',     'NG', 'US', 'AF_NORTHAM', 'LONG',  'T1', 14),
+    ('LOS', 'ADD', 'Lagos', 'Addis Ababa',    'NG', 'ET', 'AF_AFRICA', 'MEDIUM', 'T1', 15),
+    ('PHC', 'LHR', 'Port Harcourt', 'London', 'NG', 'GB', 'AF_EUROPE', 'LONG',   'T1', 16),
+    ('LOS', 'KGL', 'Lagos', 'Kigali',         'NG', 'RW', 'AF_AFRICA', 'MEDIUM', 'T1', 17),
+    ('PHC', 'LGW', 'Port Harcourt', 'London Gatwick', 'NG', 'GB', 'AF_EUROPE', 'LONG', 'T1', 18)
   ])
 ) S
 ON T.route_key = S.route_key

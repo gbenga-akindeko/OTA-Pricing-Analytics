@@ -228,6 +228,14 @@ def run_recommendations(req: RunRequest) -> dict:
         return {"review_date": str(review_date), "cells": len(rows), "dry_run": True,
                 "sample": out[:3]}
 
+    # The engine reruns every 30 minutes and the dashboard shows the latest
+    # run only. A cell an analyst already decided today keeps that decision,
+    # otherwise every rerun would put approved prices back in the queue.
+    decided = decided_cells(review_date)
+    for r in out:
+        if r["market_sk"] in decided:
+            r["status"] = decided[r["market_sk"]]
+
     if out:
         # A load job, not a streaming insert. Streamed rows sit in a buffer
         # that UPDATE cannot touch for up to ~90 minutes, and /decision
@@ -256,6 +264,27 @@ def run_recommendations(req: RunRequest) -> dict:
         "engine_version": ENGINE_VERSION,
         "ruleset_version": ruleset_version,
     }
+
+
+def decided_cells(review_date: date) -> dict:
+    """Latest decision per market cell on this review date, from the audit
+    trail rather than the recommendation status, which can lag behind it."""
+    try:
+        rows = bq.query(f"""
+            SELECT r.market_sk,
+                   ARRAY_AGG(d.decision ORDER BY d.decided_at DESC LIMIT 1)[OFFSET(0)] AS decision
+            FROM `{PROJECT}.tvd_fareiq_mart.fact_price_decision` d
+            JOIN `{PROJECT}.tvd_fareiq_mart.fact_price_recommendation` r USING (recommendation_id)
+            WHERE r.review_date = @review_date
+              AND d.decided_at >= TIMESTAMP(DATE_SUB(@review_date, INTERVAL 1 DAY))
+            GROUP BY r.market_sk
+        """, job_config=bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("review_date", "DATE", review_date)
+        ]), location=BQ_LOCATION).result()
+        return {row["market_sk"]: row["decision"] for row in rows}
+    except Exception as exc:
+        log.warning("could not read today's decisions, all cells start PENDING: %s", exc)
+        return {}
 
 
 def _bq_safe(value):
@@ -426,6 +455,9 @@ def transform(req: TransformRequest, authorization: str = Header(default="")):
 
     end = req.window_end or datetime.now(timezone.utc)
     start = end - timedelta(hours=max(req.window_hours, 1))
+    # Start on a 30 minute collection window boundary. A start in the middle
+    # of a window would rebuild that window's snapshot from half its offers.
+    start = start.replace(minute=start.minute - start.minute % 30, second=0, microsecond=0)
     params = [sql_runner.ts_param("window_start", start),
               sql_runner.ts_param("window_end", end),
               bigquery.ScalarQueryParameter("base_currency", "STRING", cfg.base_currency)]

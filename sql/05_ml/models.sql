@@ -122,7 +122,7 @@ SELECT
 FROM sessions s
 JOIN `${PROJECT}.tvd_fareiq_mart.fact_market_snapshot` ms
   ON ms.route_key = s.route_key AND ms.cabin = s.cabin
- AND ms.collection_window = TIMESTAMP_TRUNC(s.session_start, HOUR)
+ AND ms.collection_window = TIMESTAMP_SECONDS(DIV(UNIX_SECONDS(s.session_start), 1800) * 1800)
 WHERE ms.market_median > 0;
 
 

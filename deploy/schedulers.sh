@@ -5,14 +5,18 @@
 # The daily shape:
 #   03:00  T3 sweep      long tail routes, once a day
 #   every 4h T2 sweep    mid tier
-#   hourly  T1 sweep     the routes that actually move revenue
-#   05:30  transform     raw -> fact_offer -> fact_market_snapshot
+#   :00/:30 T1 sweep     the routes that actually move revenue, every 30 min
+#   :10/:40 transform    raw -> fact_offer -> fact_market_snapshot
 #   05:45  mining        anomalies, regime shifts, coverage gaps, fee moves
 #   06:00  ML refresh    elasticity and fair price (weekdays)
-#   06:15  recommend     pricing engine writes the day's recommendations
+#   :20/:50 recommend    pricing engine rescores every cell, every 30 min
 #   06:45  sheet pull    Apps Script trigger, not scheduler
 #   07:00  digest        Apps Script trigger
 #   18:00  outcomes      measure T+7 results of past decisions
+#
+# Cost note: every T1 sweep is one search per route, date, cabin and trip
+# type. At 30 minutes that is 48 sweeps a day, so check the GDS contract's
+# search quota (look-to-book) before pointing this at paid channels.
 set -euo pipefail
 
 PROJECT="${GCP_PROJECT:?set GCP_PROJECT}"
@@ -41,7 +45,7 @@ job () {
 }
 
 # ---- collection -------------------------------------------------------
-job tvd-ota-fareiq-collect-t1 "0 * * * *"     "${COLLECTOR_URL}/collect" \
+job tvd-ota-fareiq-collect-t1 "*/30 * * * *"  "${COLLECTOR_URL}/collect" \
   '{"tier":"T1","horizon_days":[1,3,7,14,21,30,45,60,90],"cabins":["ECONOMY","BUSINESS"]}'
 
 job tvd-ota-fareiq-collect-t2 "15 */4 * * *"  "${COLLECTOR_URL}/collect" \
@@ -51,8 +55,8 @@ job tvd-ota-fareiq-collect-t3 "0 3 * * *"     "${COLLECTOR_URL}/collect" \
   '{"tier":"T3","horizon_days":[7,30,60],"cabins":["ECONOMY"]}'
 
 # ---- transform --------------------------------------------------------
-job tvd-ota-fareiq-transform  "30 5 * * *"    "${PRICING_URL}/transform" \
-  '{"window_hours":24}'
+job tvd-ota-fareiq-transform  "10,40 * * * *" "${PRICING_URL}/transform" \
+  '{"window_hours":2}'
 
 # ---- mining -----------------------------------------------------------
 job tvd-ota-fareiq-mining "45 5 * * *" "${PRICING_URL}/mine" \
@@ -63,7 +67,7 @@ job tvd-ota-fareiq-ml-refresh "0 6 * * 1-5"   "${PRICING_URL}/refresh-models" \
   '{"models":["fair_price","elasticity"]}'
 
 # ---- recommendations --------------------------------------------------
-job tvd-ota-fareiq-recommend  "15 6 * * *"    "${PRICING_URL}/recommend" '{}'
+job tvd-ota-fareiq-recommend  "20,50 * * * *" "${PRICING_URL}/recommend" '{}'
 
 # ---- outcome measurement ---------------------------------------------
 job tvd-ota-fareiq-outcomes   "0 18 * * *"    "${PRICING_URL}/measure-outcomes" \

@@ -293,21 +293,21 @@ if [[ "$SCHEDULE" == "1" ]]; then
   collect_body="{\"tier\":\"T1\",\"source_ids\":[\"mock_market\"],\"horizon_days\":[${HORIZONS}],\"cabins\":[${CABINS}],\"trip_types\":[${TRIPS}],\"stay_days\":${STAY_DAYS}}"
   if gcloud scheduler jobs describe "$T1_JOB" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
     gcloud scheduler jobs update http "$T1_JOB" --location="$REGION" --project="$PROJECT" \
-      --schedule="0 * * * *" --time-zone="Africa/Lagos" \
+      --schedule="*/30 * * * *" --time-zone="Africa/Lagos" \
       --uri="${COLLECTOR_URL}/collect" --http-method=POST \
       --update-headers="Content-Type=application/json" \
       --message-body="$collect_body" \
       --oidc-service-account-email="$SCHEDULER_SA" --oidc-token-audience="$COLLECTOR_URL" >/dev/null
   else
     gcloud scheduler jobs create http "$T1_JOB" --location="$REGION" --project="$PROJECT" \
-      --schedule="0 * * * *" --time-zone="Africa/Lagos" \
+      --schedule="*/30 * * * *" --time-zone="Africa/Lagos" \
       --uri="${COLLECTOR_URL}/collect" --http-method=POST \
       --headers="Content-Type=application/json" \
       --message-body="$collect_body" \
       --oidc-service-account-email="$SCHEDULER_SA" --oidc-token-audience="$COLLECTOR_URL" >/dev/null
   fi
   gcloud scheduler jobs resume "$T1_JOB" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
-  ok "$T1_JOB: hourly mock collection on $COLLECTOR_SVC"
+  ok "$T1_JOB: mock collection every 30 minutes on $COLLECTOR_SVC"
 
   # Same names deploy/schedulers.sh uses, so running that script later simply
   # replaces these with the production versions.
@@ -322,10 +322,12 @@ if [[ "$SCHEDULE" == "1" ]]; then
       --attempt-deadline=1800s >/dev/null
     ok "$name: $schedule (Africa/Lagos) -> $path"
   }
-  pricing_job tvd-ota-fareiq-transform "30 5 * * *" /transform '{"window_hours":24}'
-  pricing_job tvd-ota-fareiq-recommend "15 6 * * *" /recommend '{}'
+  # Every 30 minutes: collect at :00/:30, transform at :10/:40, recommend at
+  # :20/:50, so the dashboard's 30 minute refresh always finds a fresh run.
+  pricing_job tvd-ota-fareiq-transform "10,40 * * * *" /transform '{"window_hours":2}'
+  pricing_job tvd-ota-fareiq-recommend "20,50 * * * *" /recommend '{}'
 
-  warn "Hourly mock collection is now live. Pause it with:"
+  warn "Mock collection every 30 minutes is now live. Pause it with:"
   warn "  gcloud scheduler jobs pause $T1_JOB --location=$REGION --project=$PROJECT"
 fi
 
