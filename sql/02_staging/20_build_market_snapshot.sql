@@ -21,8 +21,37 @@
 DECLARE window_start TIMESTAMP DEFAULT @window_start;
 DECLARE window_end   TIMESTAMP DEFAULT @window_end;
 
+-- Manual prices (the daily competitor and Skyscanner checks, source_id
+-- 'manual_*') are typed once a day, while windows are 30 minutes. They are
+-- carried into every later window for 24 hours, so a price checked at 9am
+-- still counts in the 4pm snapshot. A fresher observation of the same seller
+-- in the window itself always wins over a carried one. Only competitor
+-- prices are carried; our own price always comes from the current window.
 CREATE TEMP TABLE cell_offers AS
-SELECT * EXCEPT(rn) FROM (
+WITH clean AS (
+  SELECT o.*
+  FROM `${PROJECT}.tvd_fareiq_mart.fact_offer` o
+  WHERE o.collected_at >= TIMESTAMP_SUB(window_start, INTERVAL 24 HOUR)
+    AND o.collected_at < window_end
+    AND NOT EXISTS (SELECT 1 FROM UNNEST(o.dq_flags) f WHERE f LIKE 'BLOCKING_%')
+),
+in_window AS (
+  SELECT c.*, 0 AS carried FROM clean c
+  WHERE c.collected_at >= window_start
+),
+windows AS (
+  SELECT DISTINCT collection_window FROM in_window
+),
+carried AS (
+  SELECT c.* REPLACE (w.collection_window AS collection_window), 1 AS carried
+  FROM windows w
+  JOIN clean c
+    ON STARTS_WITH(c.source_id, 'manual_')
+   AND c.seller_type != 'US'          -- our own price is never carried stale
+   AND c.collection_window < w.collection_window
+   AND c.collected_at >= TIMESTAMP_SUB(w.collection_window, INTERVAL 24 HOUR)
+)
+SELECT * EXCEPT(rn, carried) FROM (
   SELECT
     o.*,
     -- A price a customer could actually pay somewhere else. Supply channels
@@ -31,11 +60,11 @@ SELECT * EXCEPT(rn) FROM (
     ROW_NUMBER() OVER (
       PARTITION BY o.collection_window, o.route_key, o.departure_date, o.cabin,
                    o.trip_type, o.pos_country, o.seller_id
-      ORDER BY o.comparable_cost_base ASC
+      ORDER BY o.carried ASC,
+               IF(o.carried = 1, UNIX_SECONDS(o.collected_at), 0) DESC,
+               o.comparable_cost_base ASC
     ) AS rn
-  FROM `${PROJECT}.tvd_fareiq_mart.fact_offer` o
-  WHERE o.collected_at >= window_start AND o.collected_at < window_end
-    AND NOT EXISTS (SELECT 1 FROM UNNEST(o.dq_flags) f WHERE f LIKE 'BLOCKING_%')
+  FROM (SELECT * FROM in_window UNION ALL SELECT * FROM carried) o
 ) WHERE rn = 1;
 
 

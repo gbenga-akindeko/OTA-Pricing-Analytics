@@ -48,6 +48,8 @@ function onOpen() {
     .addItem('Build top routes from sales', 'buildTopRoutes')
     .addItem('Create today\'s competitor check', 'buildCompetitorChecks')
     .addItem('Send competitor checks to FareIQ', 'pushCompetitorChecks')
+    .addItem('Create today\'s Skyscanner check (top 20)', 'buildSkyscannerChecks')
+    .addItem('Send Skyscanner checks to FareIQ', 'pushSkyscannerChecks')
     .addItem('Sync bookings from sales register', 'syncBookingsToFareIQ')
     .addToUi();
 }
