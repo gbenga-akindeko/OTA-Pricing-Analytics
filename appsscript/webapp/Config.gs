@@ -44,7 +44,8 @@ const BRAND = {
   navy:   '#002A48',
   green:  '#00A651',
   dgreen: '#00502A',
-  orange: '#F58220',
+  orange: '#F58220',  // the dashboard's theme colour
+  orangeDeep: '#B5530A',
   sky:    '#8ED8F8',
   rust:   '#A42B20',
   ink:    '#17262F',
