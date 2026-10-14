@@ -1,62 +1,105 @@
 /**
- * Administration: users and roles, subsidiaries and their heads of finance,
+ * Administration: users and their access, subsidiaries and their heads of finance,
  * rate categories, settings, and the audit and email logs.
  */
 
 function listUsers_() {
+  var users = readTable_(SHEETS.USERS).map(function (r) {
+    var u = publicUser_(r);
+    u.blocked = isBlocked_(r);
+    u.lastLogin = iso_(r['Last Login']);
+    u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd MMM yyyy');
+    return u;
+  }).filter(function (u) { return u.email; });
+  users.sort(function (a, b) {
+    if (a.isMainAdmin !== b.isMainAdmin) return a.isMainAdmin ? -1 : 1;
+    return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
+  });
   return {
-    users: readTable_(SHEETS.USERS).map(function (r) {
-      var u = publicUser_(r);
-      u.active = toBool_(r['Active']);
-      u.lastLogin = iso_(r['Last Login']);
-      u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd/MM/yy HH:mm');
-      return u;
-    }),
-    roles: Object.keys(ROLES).map(function (k) { return { value: k, label: ROLES[k].label }; })
+    users: users,
+    permissions: PERMISSIONS.map(function (p) { return { key: p.key, label: p.label, help: p.help }; })
   };
+}
+
+/** Turns the request into permission flags. Also accepts the older { role, active } shape. */
+function permsFromPayload_(payload) {
+  var perms = {};
+  if (payload.perms && typeof payload.perms === 'object') {
+    PERMISSIONS.forEach(function (p) { perms[p.key] = payload.perms[p.key] === true; });
+  } else {
+    var role = String(payload.role || 'VIEWER').toUpperCase();
+    if (!LEGACY_ROLES[role]) throw new AppError('Choose what this person can do.', 'VALIDATION');
+    PERMISSIONS.forEach(function (p) { perms[p.key] = LEGACY_ROLES[role].indexOf(p.key) !== -1; });
+  }
+  if (perms.ADMIN) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
+  return perms;
+}
+
+function nameFromEmail_(email) {
+  var local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
+  return local.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
 }
 
 function saveUser_(user, payload) {
   payload = payload || {};
   var email = normEmail_(payload.email);
   if (!isEmail_(email)) throw new AppError('Enter a valid email address.', 'VALIDATION');
-  var role = String(payload.role || '').toUpperCase();
-  if (!ROLES[role]) throw new AppError('Choose a role.', 'VALIDATION');
-  var active = payload.active !== false;
-  var name = String(payload.name || '').trim();
-  if (!name) throw new AppError('Enter the full name.', 'VALIDATION');
+  if (isMainAdmin_(email)) return saveMainAdminDetails_(user, email, payload);
+  var perms = permsFromPayload_(payload);
+  var blocked = payload.blocked === true || payload.active === false;
+  if (email === user.email && (blocked || !perms.ADMIN)) {
+    throw new AppError('You cannot remove your own admin access. Ask another admin.', 'VALIDATION');
+  }
 
   var existing = findUser_(email);
-  if (email === user.email && (!active || role !== 'ADMIN')) {
-    throw new AppError('You cannot remove your own administrator access. Ask another administrator.', 'VALIDATION');
-  }
-  if (existing && String(existing['Role']).toUpperCase() === 'ADMIN' && toBool_(existing['Active']) && (!active || role !== 'ADMIN')) {
-    var admins = readTable_(SHEETS.USERS).filter(function (r) {
-      return String(r['Role']).toUpperCase() === 'ADMIN' && toBool_(r['Active']);
-    });
-    if (admins.length <= 1) throw new AppError('The portal must keep at least one active administrator.', 'VALIDATION');
-  }
-
+  var name = String(payload.name || '').trim() || (existing && String(existing['Full Name'] || '').trim()) || nameFromEmail_(email);
   var fields = {
     'Email': email,
     'Full Name': cellText_(name),
-    'Role': role,
-    'Subsidiary': cellText_(payload.subsidiary || ''),
-    'Active': active
+    'Role': roleFromPerms_(perms),
+    'Blocked': blocked,
+    'Active': !blocked
   };
+  if (payload.subsidiary !== undefined || !existing) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
+  PERMISSIONS.forEach(function (p) { fields[p.column] = perms[p.key]; });
+
+  var after = accessLabel_(perms, false) + (blocked ? ' (blocked)' : '');
   if (existing) {
+    var before = accessLabel_(userPerms_(existing), false) + (isBlocked_(existing) ? ' (blocked)' : '');
     updateRow_(SHEETS.USERS, existing._row, fields);
-    audit_(user.email, 'UPDATE_USER', {
-      email: email,
-      role: String(existing['Role']).toUpperCase() + ' -> ' + role,
-      active: toBool_(existing['Active']) + ' -> ' + active
-    });
+    audit_(user.email, 'UPDATE_USER', { email: email, access: before + ' -> ' + after });
   } else {
     fields['Created At'] = new Date();
     fields['Created By'] = user.email;
     appendRows_(SHEETS.USERS, [fields]);
-    audit_(user.email, 'ADD_USER', { email: email, role: role });
+    audit_(user.email, 'ADD_USER', { email: email, access: after });
   }
+  return { email: email };
+}
+
+/** The main admin's access never changes, but their name and subsidiary can. */
+function saveMainAdminDetails_(user, email, payload) {
+  var existing = findUser_(email);
+  if (!existing) throw new AppError('Run setup again to add the main admin to the Users tab.', 'NOT_FOUND');
+  var fields = {};
+  if (String(payload.name || '').trim()) fields['Full Name'] = cellText_(payload.name);
+  if (payload.subsidiary !== undefined) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
+  if (Object.keys(fields).length) {
+    updateRow_(SHEETS.USERS, existing._row, fields);
+    audit_(user.email, 'UPDATE_USER', { email: email, details: 'Name or subsidiary updated. Main admin access is always full.' });
+  }
+  return { email: email };
+}
+
+function removeUser_(user, payload) {
+  var email = normEmail_(payload && payload.email);
+  if (isMainAdmin_(email)) throw new AppError('The main admin cannot be removed.', 'VALIDATION');
+  if (email === user.email) throw new AppError('You cannot remove yourself. Ask another admin.', 'VALIDATION');
+  var existing = findUser_(email);
+  if (!existing) throw new AppError('That person is not on the portal.', 'NOT_FOUND');
+  var before = accessLabel_(userPerms_(existing), false);
+  deleteRow_(SHEETS.USERS, existing._row);
+  audit_(user.email, 'REMOVE_USER', { email: email, access: before });
   return { email: email };
 }
 

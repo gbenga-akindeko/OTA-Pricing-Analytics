@@ -37,12 +37,13 @@ function setup() {
     }));
   }
 
-  // The person running setup becomes the first administrator.
+  // The first person to run setup becomes the main admin, who always has full access.
+  var props = PropertiesService.getScriptProperties();
+  if (me && !props.getProperty('MAIN_ADMIN')) props.setProperty('MAIN_ADMIN', me);
   if (me && !findUser_(me)) {
-    appendRows_(SHEETS.USERS, [{
-      'Email': me, 'Full Name': me, 'Role': 'ADMIN', 'Subsidiary': 'Holdings', 'Active': true,
-      'Created At': new Date(), 'Created By': 'setup'
-    }]);
+    var row = { 'Email': me, 'Full Name': me, 'Role': 'ADMIN', 'Subsidiary': 'Holdings', 'Blocked': false, 'Active': true, 'Created At': new Date(), 'Created By': 'setup' };
+    PERMISSIONS.forEach(function (p) { row[p.column] = true; });
+    appendRows_(SHEETS.USERS, [row]);
   }
 
   authSecret_();

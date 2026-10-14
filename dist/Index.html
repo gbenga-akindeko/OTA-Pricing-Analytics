@@ -262,6 +262,17 @@
   table.t tr.void td.keep { text-decoration: none; }
   .details { max-width: 420px; word-break: break-word; color: var(--text-2); font-size: 12px; }
 
+  /* Users & access grid */
+  .perm-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 24px; font-size: 13px; color: var(--text-2); }
+  .perm-legend b { color: var(--text); }
+  table.perm-table th.c, table.perm-table td.c { text-align: center; width: 92px; }
+  table.perm-table td { vertical-align: middle; }
+  .perm-box { width: 18px; height: 18px; accent-color: var(--fg-orange); cursor: pointer; }
+  .perm-box:disabled { cursor: not-allowed; opacity: .6; }
+  .tick { color: var(--primary); font-weight: 800; font-size: 17px; }
+  table.perm-table tr.is-blocked td:first-child b { text-decoration: line-through; color: var(--muted); }
+  @media (max-width: 860px) { .perm-legend { grid-template-columns: 1fr; } }
+
   /* Publish form */
   .pub-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
   .pub-line { display: grid; grid-template-columns: minmax(0, 1fr) 150px 120px; gap: 12px; align-items: center; padding: 10px 18px; border-top: 1px solid var(--border); }
@@ -361,8 +372,13 @@
     return '<span class="delta ' + (up ? 'up' : 'down') + '" title="' + (up ? 'Naira weaker' : 'Naira stronger') + '">' + (up ? '&#9650; +' : '&#9660; ') + fmt(change) + (opts.pct !== undefined && opts.pct !== null ? ' (' + pct(opts.pct) + ')' : '') + '</span>';
   }
   function initials(name) { return String(name || '?').split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(function (w) { return w[0].toUpperCase(); }).join(''); }
-  function rank(role) { return { VIEWER: 1, RATE_SETTER: 2, ADMIN: 3 }[role] || 0; }
-  function can(role) { return S.boot && rank(S.boot.user.role) >= rank(role); }
+  /** True when the signed in person has this permission. 'VIEW' is everyone. A list means any of them. */
+  function can(perm) {
+    if (!S.boot) return false;
+    if (!perm || perm === 'VIEW') return true;
+    if (Array.isArray(perm)) return perm.some(can);
+    return !!(S.boot.user.perms && S.boot.user.perms[perm]);
+  }
   function isoDay(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); return isoDay(d); }
   function rid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
@@ -528,7 +544,7 @@
     { group: 'Exchange rates', items: [
       { id: 'dashboard', label: 'Dashboard', icon: 'home' },
       { id: 'fluctuations', label: 'Rate fluctuations', icon: 'chart' },
-      { id: 'publish', label: 'Publish ROE', icon: 'send', role: 'RATE_SETTER' },
+      { id: 'publish', label: 'Publish ROE', icon: 'send', perm: 'SET_RATE' },
       { id: 'history', label: 'ROE history', icon: 'clock' },
       { id: 'book', label: 'Book rates', icon: 'book' }
     ] },
@@ -538,12 +554,12 @@
       { id: 'credit', label: 'Credit control', icon: 'shield', soon: true },
       { id: 'invoices', label: 'Invoices', icon: 'file', soon: true }
     ] },
-    { group: 'Administration', role: 'ADMIN', items: [
-      { id: 'audit', label: 'Audit log', icon: 'log' },
-      { id: 'users', label: 'Users & access', icon: 'users' },
-      { id: 'subsidiaries', label: 'Subsidiaries', icon: 'building' },
-      { id: 'categories', label: 'Rate categories', icon: 'tag' },
-      { id: 'settings', label: 'Settings', icon: 'cog' }
+    { group: 'Administration', perm: ['AUDIT', 'ADMIN', 'SUBSIDIARIES', 'SETTINGS'], items: [
+      { id: 'audit', label: 'Audit log', icon: 'log', perm: 'AUDIT' },
+      { id: 'users', label: 'Users & access', icon: 'users', perm: 'ADMIN' },
+      { id: 'subsidiaries', label: 'Subsidiaries', icon: 'building', perm: 'SUBSIDIARIES' },
+      { id: 'categories', label: 'Rate categories', icon: 'tag', perm: 'SETTINGS' },
+      { id: 'settings', label: 'Settings', icon: 'cog', perm: 'SETTINGS' }
     ] }
   ];
   function navItem(id) {
@@ -619,14 +635,14 @@
   }
 
   function allowed(found) {
-    return (!found.group.role || can(found.group.role)) && (!found.item.role || can(found.item.role));
+    return can(found.group.perm) && can(found.item.perm);
   }
 
   /* ---------- shell ---------- */
   function renderShell() {
     var u = S.boot.user;
-    var nav = NAV.filter(function (g) { return !g.role || can(g.role); }).map(function (g) {
-      return '<h6>' + esc(g.group) + '</h6>' + g.items.filter(function (i) { return !i.role || can(i.role); }).map(function (i) {
+    var nav = NAV.filter(function (g) { return can(g.perm); }).map(function (g) {
+      return '<h6>' + esc(g.group) + '</h6>' + g.items.filter(function (i) { return can(i.perm); }).map(function (i) {
         return '<button data-nav="' + i.id + '">' + icon(i.icon) + '<span>' + esc(i.label) + '</span>' + (i.soon ? '<span class="soon">SOON</span>' : '') + '</button>';
       }).join('');
     }).join('');
@@ -802,7 +818,7 @@
         (latest ? '<div class="muted small">Published by ' + esc(shortName(latest.publishedBy)) + ' &middot; ' + emailBadge(latest.emailStatus) + '</div>' : '') + '</div>' +
         '<span class="spacer"></span>' +
         (latest ? '<button class="btn" id="copy-wa">' + icon('copy') + 'Copy for WhatsApp</button>' : '') +
-        (can('RATE_SETTER') ? '<button class="btn primary" data-nav="publish">' + icon('send') + 'Publish new rates</button>' : '') + '</div>' +
+        (can('SET_RATE') ? '<button class="btn primary" data-nav="publish">' + icon('send') + 'Publish new rates</button>' : '') + '</div>' +
         '<div class="grid g4" style="margin-bottom:16px">' + tiles + '</div>' +
         (latest && latest.note ? '<div class="alert" style="margin-bottom:16px"><b>Note:</b> ' + esc(latest.note) + '</div>' : '') +
         '<div class="grid g3" style="margin-bottom:16px">' + board + '</div>' +
@@ -911,7 +927,7 @@
         '<div class="card"><div class="card-b stack">' +
         '<label class="field"><span>Note on the broadcast</span><textarea class="input" name="note" maxlength="500">' + esc(S.boot.validityNote) + '</textarea></label>' +
         '<label class="check"><input type="checkbox" name="sendEmail" checked> Email the heads of finance now (' + rec.subsidiaries.length + ' subsidiar' + (rec.subsidiaries.length === 1 ? 'y' : 'ies') + (rec.internalCopy.length ? ' plus ' + rec.internalCopy.length + ' internal cop' + (rec.internalCopy.length === 1 ? 'y' : 'ies') : '') + ')</label>' +
-        (rec.subsidiaries.length ? '' : '<div class="alert">No active subsidiaries have a head of finance email yet.' + (can('ADMIN') ? ' Add them under <a href="#" data-nav="subsidiaries">Subsidiaries</a>.' : ' Ask an administrator to add them.') + '</div>') +
+        (rec.subsidiaries.length ? '' : '<div class="alert">No active subsidiaries have a head of finance email yet.' + (can('SUBSIDIARIES') ? ' Add them under <a href="#" data-nav="subsidiaries">Subsidiaries</a>.' : ' Ask an administrator to add them.') + '</div>') +
         '<div class="row"><span class="spacer"></span><button class="btn primary" type="submit" id="pub-btn">' + icon('send') + 'Publish ROE</button></div>' +
         '</div></div></div>' +
         '<div class="stack sticky"><div class="card"><div class="card-h"><h3>Broadcast preview</h3><button class="btn sm" type="button" id="pv-copy">' + icon('copy') + 'Copy for WhatsApp</button></div>' +
@@ -984,7 +1000,7 @@
       h.publications.forEach(function (p) { p.rates.forEach(function (r) {
         if (!cols.some(function (c) { return c.currency === r.currency && c.category === r.category; })) cols.push({ currency: r.currency, displayName: r.currency, category: r.category });
       }); });
-      var setter = can('RATE_SETTER');
+      var setter = can('SET_RATE');
       var rows = h.publications.map(function (p) {
         var map = {};
         p.rates.forEach(function (r) { map[r.currency + '||' + r.category] = r; });
@@ -1041,7 +1057,7 @@
         (b.entries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Effective date</th><th class="r">USD</th><th class="r">EUR</th><th class="r">GBP</th></tr></thead><tbody>' +
           b.entries.map(function (e) { return '<tr><td>' + esc(e.label) + '</td><td class="r num">' + fmt(e.usd) + '</td><td class="r num">' + fmt(e.eur) + '</td><td class="r num">' + fmt(e.gbp) + '</td></tr>'; }).join('') +
           '</tbody></table></div>' : '<div class="empty">No book rates yet.</div>') + '</div>' +
-        (can('RATE_SETTER') ? '<div class="card"><div class="card-h"><h3>Add a book rate</h3></div><form class="card-b stack" id="book-form" novalidate>' +
+        (can('SET_RATE') ? '<div class="card"><div class="card-h"><h3>Add a book rate</h3></div><form class="card-b stack" id="book-form" novalidate>' +
           '<p class="small muted" style="margin:0">Works like the "currency conv" tab: type the USD rate and the USD cross rates from OANDA, and EUR and GBP are worked out as ROUNDDOWN(USD / cross, 2). You can also type EUR and GBP directly.</p>' +
           '<div class="grid g2"><label class="field"><span>Effective date</span><input class="input" type="date" name="date" value="' + isoDay(new Date()) + '"></label>' +
           '<label class="field"><span>USD (NGN)</span><input class="input num" name="usd" inputmode="decimal" placeholder="1348"></label>' +
@@ -1079,7 +1095,7 @@
     SESSION_REVOKED: 'Session ended (access removed)', PUBLISH_ROE: 'Published ROE', VOID_ROE: 'Voided ROE', EMAIL_ROE: 'Emailed ROE',
     RESEND_ROE: 'Resent ROE', TEST_EMAIL: 'Sent test email', ADD_USER: 'Added user', UPDATE_USER: 'Changed user', ADD_SUBSIDIARY: 'Added subsidiary',
     UPDATE_SUBSIDIARY: 'Changed subsidiary', ADD_CATEGORY: 'Added rate category', UPDATE_CATEGORY: 'Changed rate category',
-    UPDATE_SETTINGS: 'Changed settings', ADD_BOOK_RATE: 'Added book rate', SETUP: 'Ran setup'
+    UPDATE_SETTINGS: 'Changed settings', REMOVE_USER: 'Removed user', ADD_BOOK_RATE: 'Added book rate', SETUP: 'Ran setup'
   };
   function auditDetails(raw) {
     if (!raw) return '';
@@ -1113,7 +1129,7 @@
         var s = a.summary;
         body = '<div class="grid g4" style="margin-bottom:16px">' +
           [['Sign ins (30 days)', s.logins, s.activeUsers + ' different users'], ['Failed sign ins (30 days)', s.failed, 'Wrong codes, lockouts and unknown emails'],
-            ['Blocked actions (30 days)', s.denied, 'Users trying pages above their role'], ['Data changes (30 days)', s.changes, 'Rates, users, subsidiaries, settings']].map(function (t) {
+            ['Blocked actions (30 days)', s.denied, 'People trying pages they have no access to'], ['Data changes (30 days)', s.changes, 'Rates, users, subsidiaries, settings']].map(function (t) {
             return '<div class="card tile accent"><div class="label">' + t[0] + '</div><div class="value num">' + t[1] + '</div><div class="meta">' + t[2] + '</div></div>';
           }).join('') + '</div>' +
           '<div class="card"><div class="card-h"><div class="chips" role="group" aria-label="Type">' + [['', 'All'], ['ACCESS', 'Access'], ['CHANGE', 'Changes'], ['EMAIL', 'Email']].map(function (c) {
@@ -1151,34 +1167,122 @@
   };
 
   VIEWS.users = function (el) {
-    return Promise.all([api('users'), api('subsidiaries')]).then(function (res) {
+    return Promise.all([api('users'), api('subsidiaries').catch(function () { return { subsidiaries: [] }; })]).then(function (res) {
       if (!stillOn('users')) return;
       var d = res[0];
       var subs = res[1].subsidiaries;
-      el.innerHTML = '<div class="card"><div class="card-h"><h3>People with portal access</h3><button class="btn primary sm" id="u-add">' + icon('plus') + 'Add user</button></div>' +
-        '<div class="card-b small muted" style="padding-bottom:0">Administrators (CFO) can do everything. Rate setters (Financial Controller) publish rates. Viewers, such as heads of finance, can see rates and history.</div>' +
-        '<div class="table-wrap"><table class="t"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Subsidiary</th><th>Status</th><th>Last sign in</th><th></th></tr></thead><tbody>' +
-        d.users.map(function (u, i) {
-          return '<tr><td><b>' + esc(u.name) + '</b></td><td>' + esc(u.email) + '</td><td>' + esc(u.roleLabel) + '</td><td>' + esc(u.subsidiary) + '</td>' +
-            '<td>' + (u.active ? '<span class="badge ok">Active</span>' : '<span class="badge bad">Disabled</span>') + '</td><td class="num">' + esc(u.lastLoginLabel || 'Never') + '</td>' +
-            '<td><button class="btn sm" data-edit="' + i + '">Edit</button></td></tr>';
-        }).join('') + '</tbody></table></div></div>';
+      var perms = d.permissions;
+      var cols = perms.concat([{ key: 'BLOCKED', label: 'Blocked', help: 'Cannot open the portal at all.' }]);
+      var filter = S.userFilter || { q: '', special: false };
+      S.userFilter = filter;
+      var me = S.boot.user.email;
 
-      function edit(u) {
-        modal({ title: u ? 'Edit ' + u.name : 'Add user',
-          body: '<label class="field"><span>Full name</span><input class="input" name="name" value="' + esc(u ? u.name : '') + '" required></label>' +
-            '<label class="field"><span>Work email</span><input class="input" name="email" type="email" value="' + esc(u ? u.email : '') + '"' + (u ? ' readonly' : '') + ' required></label>' +
-            '<label class="field"><span>Role</span><select class="input" name="role">' + d.roles.map(function (r) { return '<option value="' + r.value + '"' + ((u ? u.role : 'VIEWER') === r.value ? ' selected' : '') + '>' + esc(r.label) + '</option>'; }).join('') + '</select></label>' +
-            '<label class="field"><span>Subsidiary</span><input class="input" name="subsidiary" list="sub-list" value="' + esc(u ? u.subsidiary : '') + '"><datalist id="sub-list"><option value="Holdings">' + subs.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join('') + '</datalist></label>' +
-            '<label class="check"><input type="checkbox" name="active"' + (!u || u.active ? ' checked' : '') + '> Can sign in</label>',
-          onOk: function (f) {
-            return api('saveUser', { name: f.name.value, email: f.email.value, role: f.role.value, subsidiary: f.subsidiary.value, active: f.active.checked })
-              .then(function () { toast('User saved.'); go('users'); });
-          }
-        });
+      var legend = '<div class="card" style="margin-bottom:16px"><div class="card-b">' +
+        '<p class="small muted" style="margin:0 0 14px">Everyone on this list can sign in and see the rates, ROE history, fluctuations and book rates (view only). Tick a box to give someone more, or block them. Changes apply as soon as you press Save.</p>' +
+        '<div class="perm-legend">' + cols.map(function (c) { return '<div><b>' + esc(c.label) + '</b> &middot; ' + esc(c.help) + '</div>'; }).join('') + '</div></div></div>';
+
+      var add = '<form class="card" id="u-add-form" style="margin-bottom:16px" novalidate><div class="card-h"><h3>Add a person</h3></div><div class="card-b">' +
+        '<div class="grid g3"><label class="field"><span>Work email</span><input class="input" name="email" type="email" required placeholder="name@finchglowholdings.com"></label>' +
+        '<label class="field"><span>Full name (optional)</span><input class="input" name="name"></label>' +
+        '<label class="field"><span>Subsidiary</span><input class="input" name="subsidiary" list="sub-list"><datalist id="sub-list"><option value="Holdings">' + subs.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join('') + '</datalist></label></div>' +
+        '<div class="row" style="margin-top:12px">' + perms.map(function (p) { return '<label class="check"><input type="checkbox" name="p_' + p.key + '"> ' + esc(p.label) + '</label>'; }).join('') +
+        '<span class="spacer"></span><button class="btn primary" type="submit">' + icon('plus') + 'Add person</button></div></div></form>';
+
+      function rowHtml(u, i) {
+        var cells;
+        var actions;
+        if (u.isMainAdmin) {
+          cells = perms.map(function () { return '<td class="c"><span class="tick" aria-label="Yes">&#10003;</span></td>'; }).join('') + '<td class="c"><span class="muted">&mdash;</span></td>';
+          actions = '<td class="r small muted">Always full access</td>';
+        } else {
+          cells = cols.map(function (c) {
+            var on = c.key === 'BLOCKED' ? u.blocked : !!u.perms[c.key];
+            var lockedByAdmin = c.key !== 'ADMIN' && c.key !== 'BLOCKED' && u.perms.ADMIN;
+            var self = u.email === me && (c.key === 'ADMIN' || c.key === 'BLOCKED');
+            return '<td class="c"><input type="checkbox" class="perm-box" data-i="' + i + '" data-k="' + c.key + '" aria-label="' + esc(c.label + ' for ' + u.name) + '"' + (on || lockedByAdmin ? ' checked' : '') + (lockedByAdmin || self ? ' disabled' : '') + '></td>';
+          }).join('');
+          actions = '<td class="r" style="white-space:nowrap"><button class="btn sm primary" data-save="' + i + '" disabled>Save</button> <button class="btn sm danger" data-remove="' + i + '"' + (u.email === me ? ' disabled title="You cannot remove yourself"' : '') + '>Remove</button></td>';
+        }
+        var badge = u.isMainAdmin ? ' <span class="badge info">MAIN ADMIN</span>' : u.blocked ? ' <span class="badge bad">BLOCKED</span>' : '';
+        var meta = esc(u.email) + (u.subsidiary ? ' &middot; ' + esc(u.subsidiary) : '') + (u.lastLoginLabel ? ' &middot; Last signed in ' + esc(u.lastLoginLabel) : ' &middot; Never signed in');
+        return '<tr data-row="' + i + '" class="' + (u.blocked ? 'is-blocked' : '') + '"><td><b>' + esc(u.name) + '</b>' + badge + '<div class="small muted">' + meta + '</div></td>' + cells + actions + '</tr>';
       }
-      document.getElementById('u-add').onclick = function () { edit(null); };
-      el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { edit(d.users[Number(b.getAttribute('data-edit'))]); }; });
+
+      el.innerHTML = legend + add +
+        '<div class="card"><div class="card-h"><input class="input" id="u-q" style="flex:1;min-width:200px" placeholder="Search a name or email..." value="' + esc(filter.q) + '">' +
+        '<label class="check small"><input type="checkbox" id="u-special"' + (filter.special ? ' checked' : '') + '> Only people with special access</label><span class="small muted" id="u-count"></span></div>' +
+        '<div class="table-wrap"><table class="t perm-table"><thead><tr><th>User</th>' + cols.map(function (c) { return '<th class="c">' + esc(c.label) + '</th>'; }).join('') + '<th></th></tr></thead>' +
+        '<tbody>' + d.users.map(rowHtml).join('') + '</tbody></table></div></div>';
+
+      function special(u) { return u.isMainAdmin || u.blocked || perms.some(function (p) { return u.perms[p.key]; }); }
+      function applyFilter() {
+        var q = filter.q.trim().toLowerCase();
+        var shown = 0;
+        d.users.forEach(function (u, i) {
+          var visible = (!q || (u.name + ' ' + u.email).toLowerCase().indexOf(q) !== -1) && (!filter.special || special(u));
+          el.querySelector('tr[data-row="' + i + '"]').style.display = visible ? '' : 'none';
+          if (visible) shown++;
+        });
+        document.getElementById('u-count').textContent = shown + ' of ' + d.users.length + ' people';
+      }
+      applyFilter();
+      document.getElementById('u-q').addEventListener('input', function (ev) { filter.q = ev.target.value; applyFilter(); });
+      document.getElementById('u-special').addEventListener('change', function (ev) { filter.special = ev.target.checked; applyFilter(); });
+
+      function readRow(i) {
+        var out = { perms: {}, blocked: false };
+        el.querySelectorAll('.perm-box[data-i="' + i + '"]').forEach(function (b) {
+          if (b.getAttribute('data-k') === 'BLOCKED') out.blocked = b.checked;
+          else out.perms[b.getAttribute('data-k')] = b.checked;
+        });
+        return out;
+      }
+      el.querySelectorAll('.perm-box').forEach(function (box) {
+        box.addEventListener('change', function () {
+          var i = box.getAttribute('data-i');
+          // Admin includes everything, so show the other boxes ticked and locked while it is on.
+          if (box.getAttribute('data-k') === 'ADMIN') {
+            el.querySelectorAll('.perm-box[data-i="' + i + '"]').forEach(function (b) {
+              var k = b.getAttribute('data-k');
+              if (k === 'ADMIN' || k === 'BLOCKED') return;
+              if (box.checked) { b.checked = true; b.disabled = true; } else { b.disabled = false; b.checked = !!d.users[i].perms[k] && !d.users[i].perms.ADMIN; }
+            });
+          }
+          el.querySelector('tr[data-row="' + i + '"]').classList.toggle('is-blocked', readRow(i).blocked);
+          el.querySelector('[data-save="' + i + '"]').disabled = false;
+        });
+      });
+      el.querySelectorAll('[data-save]').forEach(function (b) {
+        b.onclick = function () {
+          var i = Number(b.getAttribute('data-save'));
+          var u = d.users[i];
+          var r = readRow(i);
+          b.disabled = true;
+          api('saveUser', { email: u.email, perms: r.perms, blocked: r.blocked }).then(function () {
+            toast('Saved access for ' + u.name + '.');
+            go('users');
+          }).catch(function (e) { b.disabled = false; fail(e); });
+        };
+      });
+      el.querySelectorAll('[data-remove]').forEach(function (b) {
+        b.onclick = function () {
+          var u = d.users[Number(b.getAttribute('data-remove'))];
+          confirmBox('Remove ' + u.name + '?', '<p><b>' + esc(u.email) + '</b> will no longer be able to sign in. Their past activity stays in the audit log.</p>', 'Remove', true).then(function (yes) {
+            if (!yes) return;
+            api('removeUser', { email: u.email }).then(function () { toast(u.name + ' removed.'); go('users'); }).catch(fail);
+          });
+        };
+      });
+      document.getElementById('u-add-form').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var f = ev.target;
+        var p = {};
+        perms.forEach(function (x) { p[x.key] = f['p_' + x.key].checked; });
+        api('saveUser', { email: f.email.value, name: f.name.value, subsidiary: f.subsidiary.value, perms: p, blocked: false }).then(function (r) {
+          toast(r.email + ' can now sign in.');
+          go('users');
+        }).catch(fail);
+      });
     });
   };
 

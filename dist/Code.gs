@@ -14,11 +14,25 @@ var APP_VERSION = '1.0.0';
 /** "DATABASE SHEET FOR EXCHANGE RATE WEB PORTAL". A SPREADSHEET_ID script property overrides it. */
 var DATABASE_SPREADSHEET_ID = '1xu7O0dDZmUKZ6Kd7HcswG-QQw4ybACEJOixoGGPcw7w';
 
-/** Roles, lowest to highest. A user can do everything a lower role can do. */
-var ROLES = {
-  VIEWER: { rank: 1, label: 'Viewer' },
-  RATE_SETTER: { rank: 2, label: 'Rate Setter (Financial Controller)' },
-  ADMIN: { rank: 3, label: 'Administrator (CFO)' }
+/**
+ * Access is a set of tick boxes per person on the Users & access page.
+ * Everyone who can sign in sees rates, history, fluctuations and book rates
+ * ("view only"). Each permission below adds to that. Admin includes all of
+ * them. The main admin (whoever ran setup first) always has full access.
+ */
+var PERMISSIONS = [
+  { key: 'SET_RATE', column: 'Can Set Rate', label: 'Set rate', help: 'Publishes the ROE, resends or voids broadcasts and adds book rates.' },
+  { key: 'SUBSIDIARIES', column: 'Can Manage Subsidiaries', label: 'Subsidiaries', help: 'Manages subsidiaries, heads of finance and CC lists, and sends test emails.' },
+  { key: 'AUDIT', column: 'Can View Audit', label: 'Audit log', help: 'Sees the audit log of sign ins and changes, and the email delivery log.' },
+  { key: 'SETTINGS', column: 'Can Edit Settings', label: 'Settings', help: 'Changes portal settings and rate categories.' },
+  { key: 'ADMIN', column: 'Is Admin', label: 'Admin', help: 'Opens this page and can change anyone\'s access. Includes every permission above.' }
+];
+
+/** Older role names, still understood when reading the sheet or the API. */
+var LEGACY_ROLES = {
+  ADMIN: ['SET_RATE', 'SUBSIDIARIES', 'AUDIT', 'SETTINGS', 'ADMIN'],
+  RATE_SETTER: ['SET_RATE'],
+  VIEWER: []
 };
 
 /** Tabs in the database spreadsheet. Headers are matched by name, so columns can be reordered. */
@@ -26,7 +40,7 @@ var SHEETS = {
   SETTINGS: { name: 'Settings', headers: ['Key', 'Value', 'Description'] },
   USERS: {
     name: 'Users',
-    headers: ['Email', 'Full Name', 'Role', 'Subsidiary', 'Active', 'Created At', 'Created By', 'Last Login']
+    headers: ['Email', 'Full Name', 'Subsidiary', 'Role', 'Can Set Rate', 'Can Manage Subsidiaries', 'Can View Audit', 'Can Edit Settings', 'Is Admin', 'Blocked', 'Active', 'Created At', 'Created By', 'Last Login']
   },
   SUBSIDIARIES: {
     name: 'Subsidiaries',
@@ -205,6 +219,10 @@ function updateRow_(def, rowNumber, fields) {
   range.setValues([rowFromObject_(headers, fields, existing)]);
 }
 
+function deleteRow_(def, rowNumber) {
+  getSheet_(def).deleteRow(rowNumber);
+}
+
 function ensureHeaders_(sheet, def) {
   var headers = readHeaders_(sheet);
   var missing = def.headers.filter(function (h) { return headers.indexOf(h) === -1; });
@@ -300,7 +318,7 @@ function withLock_(fn) {
  * passwordless: the portal emails a 6 digit code that is valid for 10 minutes.
  * A successful sign in returns a random session token that the browser keeps
  * for the tab. Every server call re-checks the Users tab, so deactivating a
- * user or changing their role takes effect immediately.
+ * user or changing their access takes effect immediately.
  */
 
 function normEmail_(email) {
@@ -346,19 +364,62 @@ function findUser_(email) {
   return null;
 }
 
+function isMainAdmin_(email) {
+  var main = normEmail_(PropertiesService.getScriptProperties().getProperty('MAIN_ADMIN'));
+  return !!main && main === normEmail_(email);
+}
+
+function hasCell_(row, column) {
+  return Object.prototype.hasOwnProperty.call(row, column) && row[column] !== '' && row[column] !== null && row[column] !== undefined;
+}
+
+/** Permission flags for a Users row. Rows without tick box columns fall back to the old Role column. */
+function userPerms_(row) {
+  var perms = {};
+  var explicit = PERMISSIONS.some(function (p) { return hasCell_(row, p.column); });
+  var legacy = LEGACY_ROLES[String(row['Role'] || '').trim().toUpperCase()] || [];
+  PERMISSIONS.forEach(function (p) {
+    perms[p.key] = explicit ? toBool_(row[p.column]) : legacy.indexOf(p.key) !== -1;
+  });
+  if (perms.ADMIN || isMainAdmin_(row['Email'])) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
+  return perms;
+}
+
+function isBlocked_(row) {
+  if (isMainAdmin_(row['Email'])) return false;
+  if (toBool_(row['Blocked'])) return true;
+  return hasCell_(row, 'Active') && !toBool_(row['Active']);
+}
+
+/** Short description of someone's access, e.g. "Admin" or "Set rate, Audit log". */
+function accessLabel_(perms, main) {
+  if (main) return 'Main admin';
+  if (perms.ADMIN) return 'Admin';
+  var labels = PERMISSIONS.filter(function (p) { return perms[p.key]; }).map(function (p) { return p.label; });
+  return labels.length ? labels.join(', ') : 'View only';
+}
+
+/** Role column kept in the sheet for people reading it directly. */
+function roleFromPerms_(perms) {
+  return perms.ADMIN ? 'ADMIN' : perms.SET_RATE ? 'RATE_SETTER' : 'VIEWER';
+}
+
 function publicUser_(row) {
-  var role = String(row['Role']).trim().toUpperCase();
+  var perms = userPerms_(row);
+  var main = isMainAdmin_(row['Email']);
   return {
     email: normEmail_(row['Email']),
     name: String(row['Full Name'] || '').trim() || normEmail_(row['Email']),
-    role: role,
-    roleLabel: ROLES[role] ? ROLES[role].label : role,
+    perms: perms,
+    isMainAdmin: main,
+    role: roleFromPerms_(perms),
+    roleLabel: accessLabel_(perms, main),
     subsidiary: String(row['Subsidiary'] || '')
   };
 }
 
 function isActiveUser_(row) {
-  return !!row && toBool_(row['Active']) && !!ROLES[String(row['Role']).trim().toUpperCase()];
+  return !!row && !!normEmail_(row['Email']) && !isBlocked_(row);
 }
 
 /** Step 1 of sign in. The reply never reveals whether the email is registered. */
@@ -423,8 +484,8 @@ function verifyCode_(payload) {
   return { token: token, user: publicUser_(user) };
 }
 
-/** Resolves a session token to an active user, enforcing the minimum role. */
-function requireUser_(token, minRole, action) {
+/** Resolves a session token to an active user who holds `perm` ('VIEW' means any signed in user). */
+function requireUser_(token, perm, action) {
   var expired = new AppError('Your session has expired. Please sign in again.', 'AUTH');
   if (!token || typeof token !== 'string' || token.length < 32) throw expired;
   var cache = CacheService.getScriptCache();
@@ -443,8 +504,8 @@ function requireUser_(token, minRole, action) {
     throw new AppError('Your portal access has been removed. Contact the CFO office.', 'AUTH');
   }
   var user = publicUser_(row);
-  if (ROLES[user.role].rank < ROLES[minRole].rank) {
-    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ' as ' + user.role);
+  if (perm !== 'VIEW' && !user.perms[perm]) {
+    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ' without ' + perm + ' (has: ' + user.roleLabel + ')');
     throw new AppError('You do not have permission to do that.', 'FORBIDDEN');
   }
   cache.put(key, raw, AUTH.SESSION_IDLE_SECONDS);
@@ -1192,64 +1253,107 @@ function sendTestEmail_(user, payload) {
 
 // ===== Admin.js =====
 /**
- * Administration: users and roles, subsidiaries and their heads of finance,
+ * Administration: users and their access, subsidiaries and their heads of finance,
  * rate categories, settings, and the audit and email logs.
  */
 
 function listUsers_() {
+  var users = readTable_(SHEETS.USERS).map(function (r) {
+    var u = publicUser_(r);
+    u.blocked = isBlocked_(r);
+    u.lastLogin = iso_(r['Last Login']);
+    u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd MMM yyyy');
+    return u;
+  }).filter(function (u) { return u.email; });
+  users.sort(function (a, b) {
+    if (a.isMainAdmin !== b.isMainAdmin) return a.isMainAdmin ? -1 : 1;
+    return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
+  });
   return {
-    users: readTable_(SHEETS.USERS).map(function (r) {
-      var u = publicUser_(r);
-      u.active = toBool_(r['Active']);
-      u.lastLogin = iso_(r['Last Login']);
-      u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd/MM/yy HH:mm');
-      return u;
-    }),
-    roles: Object.keys(ROLES).map(function (k) { return { value: k, label: ROLES[k].label }; })
+    users: users,
+    permissions: PERMISSIONS.map(function (p) { return { key: p.key, label: p.label, help: p.help }; })
   };
+}
+
+/** Turns the request into permission flags. Also accepts the older { role, active } shape. */
+function permsFromPayload_(payload) {
+  var perms = {};
+  if (payload.perms && typeof payload.perms === 'object') {
+    PERMISSIONS.forEach(function (p) { perms[p.key] = payload.perms[p.key] === true; });
+  } else {
+    var role = String(payload.role || 'VIEWER').toUpperCase();
+    if (!LEGACY_ROLES[role]) throw new AppError('Choose what this person can do.', 'VALIDATION');
+    PERMISSIONS.forEach(function (p) { perms[p.key] = LEGACY_ROLES[role].indexOf(p.key) !== -1; });
+  }
+  if (perms.ADMIN) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
+  return perms;
+}
+
+function nameFromEmail_(email) {
+  var local = email.split('@')[0].replace(/[._-]+/g, ' ').trim();
+  return local.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
 }
 
 function saveUser_(user, payload) {
   payload = payload || {};
   var email = normEmail_(payload.email);
   if (!isEmail_(email)) throw new AppError('Enter a valid email address.', 'VALIDATION');
-  var role = String(payload.role || '').toUpperCase();
-  if (!ROLES[role]) throw new AppError('Choose a role.', 'VALIDATION');
-  var active = payload.active !== false;
-  var name = String(payload.name || '').trim();
-  if (!name) throw new AppError('Enter the full name.', 'VALIDATION');
+  if (isMainAdmin_(email)) return saveMainAdminDetails_(user, email, payload);
+  var perms = permsFromPayload_(payload);
+  var blocked = payload.blocked === true || payload.active === false;
+  if (email === user.email && (blocked || !perms.ADMIN)) {
+    throw new AppError('You cannot remove your own admin access. Ask another admin.', 'VALIDATION');
+  }
 
   var existing = findUser_(email);
-  if (email === user.email && (!active || role !== 'ADMIN')) {
-    throw new AppError('You cannot remove your own administrator access. Ask another administrator.', 'VALIDATION');
-  }
-  if (existing && String(existing['Role']).toUpperCase() === 'ADMIN' && toBool_(existing['Active']) && (!active || role !== 'ADMIN')) {
-    var admins = readTable_(SHEETS.USERS).filter(function (r) {
-      return String(r['Role']).toUpperCase() === 'ADMIN' && toBool_(r['Active']);
-    });
-    if (admins.length <= 1) throw new AppError('The portal must keep at least one active administrator.', 'VALIDATION');
-  }
-
+  var name = String(payload.name || '').trim() || (existing && String(existing['Full Name'] || '').trim()) || nameFromEmail_(email);
   var fields = {
     'Email': email,
     'Full Name': cellText_(name),
-    'Role': role,
-    'Subsidiary': cellText_(payload.subsidiary || ''),
-    'Active': active
+    'Role': roleFromPerms_(perms),
+    'Blocked': blocked,
+    'Active': !blocked
   };
+  if (payload.subsidiary !== undefined || !existing) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
+  PERMISSIONS.forEach(function (p) { fields[p.column] = perms[p.key]; });
+
+  var after = accessLabel_(perms, false) + (blocked ? ' (blocked)' : '');
   if (existing) {
+    var before = accessLabel_(userPerms_(existing), false) + (isBlocked_(existing) ? ' (blocked)' : '');
     updateRow_(SHEETS.USERS, existing._row, fields);
-    audit_(user.email, 'UPDATE_USER', {
-      email: email,
-      role: String(existing['Role']).toUpperCase() + ' -> ' + role,
-      active: toBool_(existing['Active']) + ' -> ' + active
-    });
+    audit_(user.email, 'UPDATE_USER', { email: email, access: before + ' -> ' + after });
   } else {
     fields['Created At'] = new Date();
     fields['Created By'] = user.email;
     appendRows_(SHEETS.USERS, [fields]);
-    audit_(user.email, 'ADD_USER', { email: email, role: role });
+    audit_(user.email, 'ADD_USER', { email: email, access: after });
   }
+  return { email: email };
+}
+
+/** The main admin's access never changes, but their name and subsidiary can. */
+function saveMainAdminDetails_(user, email, payload) {
+  var existing = findUser_(email);
+  if (!existing) throw new AppError('Run setup again to add the main admin to the Users tab.', 'NOT_FOUND');
+  var fields = {};
+  if (String(payload.name || '').trim()) fields['Full Name'] = cellText_(payload.name);
+  if (payload.subsidiary !== undefined) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
+  if (Object.keys(fields).length) {
+    updateRow_(SHEETS.USERS, existing._row, fields);
+    audit_(user.email, 'UPDATE_USER', { email: email, details: 'Name or subsidiary updated. Main admin access is always full.' });
+  }
+  return { email: email };
+}
+
+function removeUser_(user, payload) {
+  var email = normEmail_(payload && payload.email);
+  if (isMainAdmin_(email)) throw new AppError('The main admin cannot be removed.', 'VALIDATION');
+  if (email === user.email) throw new AppError('You cannot remove yourself. Ask another admin.', 'VALIDATION');
+  var existing = findUser_(email);
+  if (!existing) throw new AppError('That person is not on the portal.', 'NOT_FOUND');
+  var before = accessLabel_(userPerms_(existing), false);
+  deleteRow_(SHEETS.USERS, existing._row);
+  audit_(user.email, 'REMOVE_USER', { email: email, access: before });
   return { email: email };
 }
 
@@ -1494,12 +1598,13 @@ function setup() {
     }));
   }
 
-  // The person running setup becomes the first administrator.
+  // The first person to run setup becomes the main admin, who always has full access.
+  var props = PropertiesService.getScriptProperties();
+  if (me && !props.getProperty('MAIN_ADMIN')) props.setProperty('MAIN_ADMIN', me);
   if (me && !findUser_(me)) {
-    appendRows_(SHEETS.USERS, [{
-      'Email': me, 'Full Name': me, 'Role': 'ADMIN', 'Subsidiary': 'Holdings', 'Active': true,
-      'Created At': new Date(), 'Created By': 'setup'
-    }]);
+    var row = { 'Email': me, 'Full Name': me, 'Role': 'ADMIN', 'Subsidiary': 'Holdings', 'Blocked': false, 'Active': true, 'Created At': new Date(), 'Created By': 'setup' };
+    PERMISSIONS.forEach(function (p) { row[p.column] = true; });
+    appendRows_(SHEETS.USERS, [row]);
   }
 
   authSecret_();
@@ -1534,7 +1639,7 @@ function formatSheets_() {
  * Web app entry point and API router.
  *
  * The browser calls `api(token, action, payload)` through google.script.run.
- * Each action declares the minimum role it needs and whether it writes, in
+ * Each action declares the permission it needs and whether it writes, in
  * which case it runs under the script lock so two people cannot publish at
  * the same moment.
  */
@@ -1554,37 +1659,38 @@ function include(name) {
 
 var API = {
   // Public (no session)
-  config: { role: null, fn: function () { return publicConfig_(); } },
-  requestCode: { role: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
-  verifyCode: { role: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
-  logout: { role: null, fn: function (u, p, token) { return logout_(token); } },
+  config: { perm: null, fn: function () { return publicConfig_(); } },
+  requestCode: { perm: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
+  verifyCode: { perm: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
+  logout: { perm: null, fn: function (u, p, token) { return logout_(token); } },
 
   // Everyone signed in
-  bootstrap: { role: 'VIEWER', fn: function (u) { return bootstrap_(u); } },
-  current: { role: 'VIEWER', fn: function () { return getCurrent_(); } },
-  history: { role: 'VIEWER', fn: function (u, p) { return getHistory_(p); } },
-  fluctuations: { role: 'VIEWER', fn: function (u, p) { return getFluctuations_(p); } },
-  bookRates: { role: 'VIEWER', fn: function () { return getBookRates_(); } },
+  bootstrap: { perm: 'VIEW', fn: function (u) { return bootstrap_(u); } },
+  current: { perm: 'VIEW', fn: function () { return getCurrent_(); } },
+  history: { perm: 'VIEW', fn: function (u, p) { return getHistory_(p); } },
+  fluctuations: { perm: 'VIEW', fn: function (u, p) { return getFluctuations_(p); } },
+  bookRates: { perm: 'VIEW', fn: function () { return getBookRates_(); } },
 
-  // CFO and Financial Controller
-  publish: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return publishRates_(u, p); } },
-  resend: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
-  voidPublication: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
-  addBookRate: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
-  recipients: { role: 'RATE_SETTER', fn: function () { return recipientSummary_(); } },
+  // Set rate permission
+  publish: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return publishRates_(u, p); } },
+  resend: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
+  voidPublication: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
+  addBookRate: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
+  recipients: { perm: 'SET_RATE', fn: function () { return recipientSummary_(); } },
 
-  // Administrators
-  users: { role: 'ADMIN', fn: function () { return listUsers_(); } },
-  saveUser: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveUser_(u, p); } },
-  subsidiaries: { role: 'ADMIN', fn: function () { return listSubsidiaries_(); } },
-  saveSubsidiary: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
-  testEmail: { role: 'ADMIN', lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
-  categories: { role: 'ADMIN', fn: function () { return listCategoriesAdmin_(); } },
-  saveCategory: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
-  settings: { role: 'ADMIN', fn: function () { return getSettingsAdmin_(); } },
-  saveSettings: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
-  audit: { role: 'ADMIN', fn: function (u, p) { return getAudit_(p); } },
-  emailLog: { role: 'ADMIN', fn: function (u, p) { return getEmailLog_(p); } }
+  // Admin pages (each needs its own permission; Admin has them all)
+  users: { perm: 'ADMIN', fn: function () { return listUsers_(); } },
+  saveUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return saveUser_(u, p); } },
+  removeUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return removeUser_(u, p); } },
+  subsidiaries: { perm: 'SUBSIDIARIES', fn: function () { return listSubsidiaries_(); } },
+  saveSubsidiary: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
+  testEmail: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
+  categories: { perm: 'SETTINGS', fn: function () { return listCategoriesAdmin_(); } },
+  saveCategory: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
+  settings: { perm: 'SETTINGS', fn: function () { return getSettingsAdmin_(); } },
+  saveSettings: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
+  audit: { perm: 'AUDIT', fn: function (u, p) { return getAudit_(p); } },
+  emailLog: { perm: 'AUDIT', fn: function (u, p) { return getEmailLog_(p); } }
 };
 
 function api(token, action, payload) {
@@ -1592,7 +1698,7 @@ function api(token, action, payload) {
     var def = Object.prototype.hasOwnProperty.call(API, action) ? API[action] : null;
     if (!def) throw new AppError('Unknown action.', 'NOT_FOUND');
     var run = function () {
-      var user = def.role ? requireUser_(token, def.role, action) : null;
+      var user = def.perm ? requireUser_(token, def.perm, action) : null;
       return def.fn(user, payload || {}, token);
     };
     return { ok: true, data: def.lock ? withLock_(run) : run() };

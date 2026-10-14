@@ -2,7 +2,7 @@
  * Web app entry point and API router.
  *
  * The browser calls `api(token, action, payload)` through google.script.run.
- * Each action declares the minimum role it needs and whether it writes, in
+ * Each action declares the permission it needs and whether it writes, in
  * which case it runs under the script lock so two people cannot publish at
  * the same moment.
  */
@@ -22,37 +22,38 @@ function include(name) {
 
 var API = {
   // Public (no session)
-  config: { role: null, fn: function () { return publicConfig_(); } },
-  requestCode: { role: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
-  verifyCode: { role: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
-  logout: { role: null, fn: function (u, p, token) { return logout_(token); } },
+  config: { perm: null, fn: function () { return publicConfig_(); } },
+  requestCode: { perm: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
+  verifyCode: { perm: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
+  logout: { perm: null, fn: function (u, p, token) { return logout_(token); } },
 
   // Everyone signed in
-  bootstrap: { role: 'VIEWER', fn: function (u) { return bootstrap_(u); } },
-  current: { role: 'VIEWER', fn: function () { return getCurrent_(); } },
-  history: { role: 'VIEWER', fn: function (u, p) { return getHistory_(p); } },
-  fluctuations: { role: 'VIEWER', fn: function (u, p) { return getFluctuations_(p); } },
-  bookRates: { role: 'VIEWER', fn: function () { return getBookRates_(); } },
+  bootstrap: { perm: 'VIEW', fn: function (u) { return bootstrap_(u); } },
+  current: { perm: 'VIEW', fn: function () { return getCurrent_(); } },
+  history: { perm: 'VIEW', fn: function (u, p) { return getHistory_(p); } },
+  fluctuations: { perm: 'VIEW', fn: function (u, p) { return getFluctuations_(p); } },
+  bookRates: { perm: 'VIEW', fn: function () { return getBookRates_(); } },
 
-  // CFO and Financial Controller
-  publish: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return publishRates_(u, p); } },
-  resend: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
-  voidPublication: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
-  addBookRate: { role: 'RATE_SETTER', lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
-  recipients: { role: 'RATE_SETTER', fn: function () { return recipientSummary_(); } },
+  // Set rate permission
+  publish: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return publishRates_(u, p); } },
+  resend: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
+  voidPublication: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
+  addBookRate: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
+  recipients: { perm: 'SET_RATE', fn: function () { return recipientSummary_(); } },
 
-  // Administrators
-  users: { role: 'ADMIN', fn: function () { return listUsers_(); } },
-  saveUser: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveUser_(u, p); } },
-  subsidiaries: { role: 'ADMIN', fn: function () { return listSubsidiaries_(); } },
-  saveSubsidiary: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
-  testEmail: { role: 'ADMIN', lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
-  categories: { role: 'ADMIN', fn: function () { return listCategoriesAdmin_(); } },
-  saveCategory: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
-  settings: { role: 'ADMIN', fn: function () { return getSettingsAdmin_(); } },
-  saveSettings: { role: 'ADMIN', lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
-  audit: { role: 'ADMIN', fn: function (u, p) { return getAudit_(p); } },
-  emailLog: { role: 'ADMIN', fn: function (u, p) { return getEmailLog_(p); } }
+  // Admin pages (each needs its own permission; Admin has them all)
+  users: { perm: 'ADMIN', fn: function () { return listUsers_(); } },
+  saveUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return saveUser_(u, p); } },
+  removeUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return removeUser_(u, p); } },
+  subsidiaries: { perm: 'SUBSIDIARIES', fn: function () { return listSubsidiaries_(); } },
+  saveSubsidiary: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
+  testEmail: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
+  categories: { perm: 'SETTINGS', fn: function () { return listCategoriesAdmin_(); } },
+  saveCategory: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
+  settings: { perm: 'SETTINGS', fn: function () { return getSettingsAdmin_(); } },
+  saveSettings: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
+  audit: { perm: 'AUDIT', fn: function (u, p) { return getAudit_(p); } },
+  emailLog: { perm: 'AUDIT', fn: function (u, p) { return getEmailLog_(p); } }
 };
 
 function api(token, action, payload) {
@@ -60,7 +61,7 @@ function api(token, action, payload) {
     var def = Object.prototype.hasOwnProperty.call(API, action) ? API[action] : null;
     if (!def) throw new AppError('Unknown action.', 'NOT_FOUND');
     var run = function () {
-      var user = def.role ? requireUser_(token, def.role, action) : null;
+      var user = def.perm ? requireUser_(token, def.perm, action) : null;
       return def.fn(user, payload || {}, token);
     };
     return { ok: true, data: def.lock ? withLock_(run) : run() };

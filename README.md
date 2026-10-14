@@ -20,8 +20,15 @@ It runs on Google Apps Script with your Google Sheet as the database, so there i
 
 **Access control and audit**
 - Only people listed in Users can sign in. They enter their work email and get a 6 digit code by email that lasts 10 minutes. Five wrong codes locks that code.
-- Three roles: **Administrator (CFO)** can do everything, **Rate Setter (Financial Controller)** publishes rates, **Viewer** (heads of finance and others) can see rates and history.
-- Turning a user off ends their session immediately.
+- **Users & access** works as a tick box grid, one row per person, with Save and Remove on each row, a search box and an "only people with special access" filter. Everyone on the list can view rates, history, fluctuations and book rates. On top of that, each person can have:
+  - **Set rate:** publish the ROE, resend or void broadcasts, add book rates
+  - **Subsidiaries:** manage subsidiaries, heads of finance, CC lists and test emails
+  - **Audit log:** see the audit and email delivery logs
+  - **Settings:** change portal settings and rate categories
+  - **Admin:** everything above, plus this page
+  - **Blocked:** cannot open the portal at all
+- The first person to run setup is the **main admin**. Their access is always full and cannot be changed or removed. Nobody can remove their own admin access.
+- Changing someone's boxes applies on their next click. Blocking someone ends their session straight away.
 - **Audit log** (administrators). Sign ins, failed codes, lockouts, blocked actions, sign outs, every rate published (old rate to new rate), voids, user and subsidiary changes, settings changes and every email sent. You can filter by Access, Changes or Email, search, pick dates and export to CSV. There is also an email delivery log.
 
 **Light and dark mode.** A round button in the bottom left corner switches between light and dark. It follows the device setting until someone picks one, then remembers their choice on that browser.
@@ -116,7 +123,7 @@ You need Node.js 18 or newer.
 
 ```bash
 npm install
-npm test        # 25 tests covering sign in, roles, publishing, emails, voids, analytics, the audit log and the bundle
+npm test        # 28 tests covering sign in, roles, publishing, emails, voids, analytics, the audit log and the bundle
 npm run dev     # preview at http://localhost:8080 with demo data
 ```
 

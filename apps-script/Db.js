@@ -87,6 +87,10 @@ function updateRow_(def, rowNumber, fields) {
   range.setValues([rowFromObject_(headers, fields, existing)]);
 }
 
+function deleteRow_(def, rowNumber) {
+  getSheet_(def).deleteRow(rowNumber);
+}
+
 function ensureHeaders_(sheet, def) {
   var headers = readHeaders_(sheet);
   var missing = def.headers.filter(function (h) { return headers.indexOf(h) === -1; });

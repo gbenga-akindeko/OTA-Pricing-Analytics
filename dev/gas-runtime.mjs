@@ -65,6 +65,7 @@ class MockSheet {
     return new MockRange(this, row, col, numRows, numCols);
   }
   getDataRange() { return this.getRange(1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
+  deleteRow(row) { this.data.splice(row - 1, 1); return this; }
   appendRow(values) { const r = this.getLastRow() + 1; values.forEach((v, j) => this.set(r, j + 1, v)); return this; }
   setFrozenRows() { return this; }
   toObjects() {

@@ -11,11 +11,25 @@ var APP_VERSION = '1.0.0';
 /** "DATABASE SHEET FOR EXCHANGE RATE WEB PORTAL". A SPREADSHEET_ID script property overrides it. */
 var DATABASE_SPREADSHEET_ID = '1xu7O0dDZmUKZ6Kd7HcswG-QQw4ybACEJOixoGGPcw7w';
 
-/** Roles, lowest to highest. A user can do everything a lower role can do. */
-var ROLES = {
-  VIEWER: { rank: 1, label: 'Viewer' },
-  RATE_SETTER: { rank: 2, label: 'Rate Setter (Financial Controller)' },
-  ADMIN: { rank: 3, label: 'Administrator (CFO)' }
+/**
+ * Access is a set of tick boxes per person on the Users & access page.
+ * Everyone who can sign in sees rates, history, fluctuations and book rates
+ * ("view only"). Each permission below adds to that. Admin includes all of
+ * them. The main admin (whoever ran setup first) always has full access.
+ */
+var PERMISSIONS = [
+  { key: 'SET_RATE', column: 'Can Set Rate', label: 'Set rate', help: 'Publishes the ROE, resends or voids broadcasts and adds book rates.' },
+  { key: 'SUBSIDIARIES', column: 'Can Manage Subsidiaries', label: 'Subsidiaries', help: 'Manages subsidiaries, heads of finance and CC lists, and sends test emails.' },
+  { key: 'AUDIT', column: 'Can View Audit', label: 'Audit log', help: 'Sees the audit log of sign ins and changes, and the email delivery log.' },
+  { key: 'SETTINGS', column: 'Can Edit Settings', label: 'Settings', help: 'Changes portal settings and rate categories.' },
+  { key: 'ADMIN', column: 'Is Admin', label: 'Admin', help: 'Opens this page and can change anyone\'s access. Includes every permission above.' }
+];
+
+/** Older role names, still understood when reading the sheet or the API. */
+var LEGACY_ROLES = {
+  ADMIN: ['SET_RATE', 'SUBSIDIARIES', 'AUDIT', 'SETTINGS', 'ADMIN'],
+  RATE_SETTER: ['SET_RATE'],
+  VIEWER: []
 };
 
 /** Tabs in the database spreadsheet. Headers are matched by name, so columns can be reordered. */
@@ -23,7 +37,7 @@ var SHEETS = {
   SETTINGS: { name: 'Settings', headers: ['Key', 'Value', 'Description'] },
   USERS: {
     name: 'Users',
-    headers: ['Email', 'Full Name', 'Role', 'Subsidiary', 'Active', 'Created At', 'Created By', 'Last Login']
+    headers: ['Email', 'Full Name', 'Subsidiary', 'Role', 'Can Set Rate', 'Can Manage Subsidiaries', 'Can View Audit', 'Can Edit Settings', 'Is Admin', 'Blocked', 'Active', 'Created At', 'Created By', 'Last Login']
   },
   SUBSIDIARIES: {
     name: 'Subsidiaries',

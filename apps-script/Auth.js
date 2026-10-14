@@ -5,7 +5,7 @@
  * passwordless: the portal emails a 6 digit code that is valid for 10 minutes.
  * A successful sign in returns a random session token that the browser keeps
  * for the tab. Every server call re-checks the Users tab, so deactivating a
- * user or changing their role takes effect immediately.
+ * user or changing their access takes effect immediately.
  */
 
 function normEmail_(email) {
@@ -51,19 +51,62 @@ function findUser_(email) {
   return null;
 }
 
+function isMainAdmin_(email) {
+  var main = normEmail_(PropertiesService.getScriptProperties().getProperty('MAIN_ADMIN'));
+  return !!main && main === normEmail_(email);
+}
+
+function hasCell_(row, column) {
+  return Object.prototype.hasOwnProperty.call(row, column) && row[column] !== '' && row[column] !== null && row[column] !== undefined;
+}
+
+/** Permission flags for a Users row. Rows without tick box columns fall back to the old Role column. */
+function userPerms_(row) {
+  var perms = {};
+  var explicit = PERMISSIONS.some(function (p) { return hasCell_(row, p.column); });
+  var legacy = LEGACY_ROLES[String(row['Role'] || '').trim().toUpperCase()] || [];
+  PERMISSIONS.forEach(function (p) {
+    perms[p.key] = explicit ? toBool_(row[p.column]) : legacy.indexOf(p.key) !== -1;
+  });
+  if (perms.ADMIN || isMainAdmin_(row['Email'])) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
+  return perms;
+}
+
+function isBlocked_(row) {
+  if (isMainAdmin_(row['Email'])) return false;
+  if (toBool_(row['Blocked'])) return true;
+  return hasCell_(row, 'Active') && !toBool_(row['Active']);
+}
+
+/** Short description of someone's access, e.g. "Admin" or "Set rate, Audit log". */
+function accessLabel_(perms, main) {
+  if (main) return 'Main admin';
+  if (perms.ADMIN) return 'Admin';
+  var labels = PERMISSIONS.filter(function (p) { return perms[p.key]; }).map(function (p) { return p.label; });
+  return labels.length ? labels.join(', ') : 'View only';
+}
+
+/** Role column kept in the sheet for people reading it directly. */
+function roleFromPerms_(perms) {
+  return perms.ADMIN ? 'ADMIN' : perms.SET_RATE ? 'RATE_SETTER' : 'VIEWER';
+}
+
 function publicUser_(row) {
-  var role = String(row['Role']).trim().toUpperCase();
+  var perms = userPerms_(row);
+  var main = isMainAdmin_(row['Email']);
   return {
     email: normEmail_(row['Email']),
     name: String(row['Full Name'] || '').trim() || normEmail_(row['Email']),
-    role: role,
-    roleLabel: ROLES[role] ? ROLES[role].label : role,
+    perms: perms,
+    isMainAdmin: main,
+    role: roleFromPerms_(perms),
+    roleLabel: accessLabel_(perms, main),
     subsidiary: String(row['Subsidiary'] || '')
   };
 }
 
 function isActiveUser_(row) {
-  return !!row && toBool_(row['Active']) && !!ROLES[String(row['Role']).trim().toUpperCase()];
+  return !!row && !!normEmail_(row['Email']) && !isBlocked_(row);
 }
 
 /** Step 1 of sign in. The reply never reveals whether the email is registered. */
@@ -128,8 +171,8 @@ function verifyCode_(payload) {
   return { token: token, user: publicUser_(user) };
 }
 
-/** Resolves a session token to an active user, enforcing the minimum role. */
-function requireUser_(token, minRole, action) {
+/** Resolves a session token to an active user who holds `perm` ('VIEW' means any signed in user). */
+function requireUser_(token, perm, action) {
   var expired = new AppError('Your session has expired. Please sign in again.', 'AUTH');
   if (!token || typeof token !== 'string' || token.length < 32) throw expired;
   var cache = CacheService.getScriptCache();
@@ -148,8 +191,8 @@ function requireUser_(token, minRole, action) {
     throw new AppError('Your portal access has been removed. Contact the CFO office.', 'AUTH');
   }
   var user = publicUser_(row);
-  if (ROLES[user.role].rank < ROLES[minRole].rank) {
-    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ' as ' + user.role);
+  if (perm !== 'VIEW' && !user.perms[perm]) {
+    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ' without ' + perm + ' (has: ' + user.roleLabel + ')');
     throw new AppError('You do not have permission to do that.', 'FORBIDDEN');
   }
   cache.put(key, raw, AUTH.SESSION_IDLE_SECONDS);
