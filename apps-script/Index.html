@@ -5,12 +5,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Finchglow Finance Portal</title>
+  <script>
+    try {
+      var savedTheme = window.localStorage.getItem('fp_theme');
+      if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.setAttribute('data-theme', savedTheme);
+    } catch (e) { /* storage blocked: follow the device setting */ }
+  </script>
   <?!= include('Styles'); ?>
 </head>
 <body>
   <div class="brand-stripe"></div>
   <div id="app"><div class="loading"><span class="spinner"></span></div></div>
   <div id="toasts" class="toast-host" aria-live="polite"></div>
+  <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Switch to dark mode" title="Switch to dark mode"></button>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <?!= include('Logo'); ?>
   <?!= include('Client'); ?>

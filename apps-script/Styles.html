@@ -141,7 +141,22 @@
   .nav .soon { margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 2px 6px; border-radius: 99px; background: var(--warn-bg); color: #9a5b00; }
   :root[data-theme="dark"] .nav .soon { color: #f7b45e; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .nav .soon { color: #f7b45e; } }
-  .side-foot { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .side-foot { padding: 12px 16px 12px 72px; min-height: 76px; display: flex; align-items: center; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+
+  /* Light / dark switch, floating bottom left */
+  .theme-toggle {
+    position: fixed; left: 16px; bottom: 16px; z-index: 45;
+    width: 48px; height: 48px; border-radius: 50%; padding: 0;
+    display: grid; place-items: center; cursor: pointer;
+    background: var(--surface); color: var(--primary);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 4px 14px rgba(15, 27, 36, .18);
+    transition: transform .15s ease, background .15s ease;
+  }
+  .theme-toggle:hover { transform: translateY(-2px); background: var(--surface-tint); }
+  .theme-toggle:active { transform: none; }
+  .theme-toggle svg { width: 22px; height: 22px; }
+  @media print { .theme-toggle { display: none; } }
 
   .main { min-width: 0; display: flex; flex-direction: column; }
   .topbar { display: flex; align-items: center; gap: 12px; padding: 14px 28px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }

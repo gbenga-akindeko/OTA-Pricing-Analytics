@@ -24,6 +24,8 @@ It runs on Google Apps Script with your Google Sheet as the database, so there i
 - Turning a user off ends their session immediately.
 - **Audit log** (administrators). Sign ins, failed codes, lockouts, blocked actions, sign outs, every rate published (old rate to new rate), voids, user and subsidiary changes, settings changes and every email sent. You can filter by Access, Changes or Email, search, pick dates and export to CSV. There is also an email delivery log.
 
+**Light and dark mode.** A round button in the bottom left corner switches between light and dark. It follows the device setting until someone picks one, then remembers their choice on that browser.
+
 **Coming soon** (already in the menu): BSP tracking, Receivables, Credit control and Invoices.
 
 ## How the Google Sheet is laid out
