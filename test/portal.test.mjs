@@ -142,63 +142,91 @@ test('roles: disabling a user ends their session straight away', () => {
 
 test('the main admin always keeps full access and cannot be changed or removed', () => {
   const { rt, admin } = fresh();
-  // Name changes are fine, but the access stays full whatever is sent.
-  ok(rt.call(admin, 'saveUser', { email: ADMIN, name: 'Chief Financial Officer', perms: {}, blocked: true }));
+  // Name and title changes are fine, but the access stays full whatever is sent.
+  ok(rt.call(admin, 'saveUser', { email: ADMIN, name: 'Chief Financial Officer', title: 'CFO', pages: {}, blocked: true }));
   const boot = ok(rt.call(admin, 'bootstrap')).user;
   assert.equal(boot.name, 'Chief Financial Officer');
-  assert.equal(boot.perms.ADMIN, true);
+  assert.equal(boot.title, 'CFO');
+  assert.equal(boot.admin, true);
   assert.equal(rt.call(admin, 'removeUser', { email: ADMIN }).code, 'VALIDATION');
-  ok(rt.call(admin, 'saveUser', { email: SETTER, name: 'FC', perms: { ADMIN: true } }));
+
+  ok(rt.call(admin, 'saveUser', { email: SETTER, admin: true }));
   const fcAdmin = signIn(rt, SETTER);
-  ok(rt.call(fcAdmin, 'saveUser', { email: ADMIN, perms: { SET_RATE: true } }));
-  assert.equal(ok(rt.call(admin, 'bootstrap')).user.roleLabel, 'Main admin');
+  ok(rt.call(fcAdmin, 'saveUser', { email: ADMIN, pages: { DASHBOARD: true } }));
+  assert.equal(ok(rt.call(admin, 'bootstrap')).user.access, 'Main admin');
   assert.equal(rt.call(fcAdmin, 'removeUser', { email: ADMIN }).code, 'VALIDATION');
   // Nobody can take away their own admin access or remove themselves.
-  assert.equal(rt.call(fcAdmin, 'saveUser', { email: SETTER, perms: { SET_RATE: true } }).code, 'VALIDATION');
+  assert.equal(rt.call(fcAdmin, 'saveUser', { email: SETTER, pages: { DASHBOARD: true } }).code, 'VALIDATION');
   assert.equal(rt.call(fcAdmin, 'removeUser', { email: SETTER }).code, 'VALIDATION');
-  const me = ok(rt.call(admin, 'users')).users[0];
-  assert.equal(me.isMainAdmin, true);
-  assert.equal(me.roleLabel, 'Main admin');
+  assert.equal(ok(rt.call(admin, 'users')).users[0].isMainAdmin, true);
 });
 
-test('permissions are tick boxes per person, and each page checks its own box', () => {
+test('access is a tick box per page, and every page checks its own box', () => {
   const { rt, admin } = fresh();
   const AUDITOR = 'auditor@finchglow.com';
-  ok(rt.call(admin, 'saveUser', { email: AUDITOR, perms: { AUDIT: true, SUBSIDIARIES: true } }));
+  ok(rt.call(admin, 'saveUser', { email: AUDITOR, title: 'Internal Auditor', pages: { AUDIT: true, HISTORY: true } }));
   const a = signIn(rt, AUDITOR);
-  const boot = ok(rt.call(a, 'bootstrap'));
-  assert.deepEqual(boot.user.perms, { SET_RATE: false, SUBSIDIARIES: true, AUDIT: true, SETTINGS: false, ADMIN: false });
-  assert.equal(boot.user.roleLabel, 'Subsidiaries, Audit log');
-  assert.equal(boot.user.name, 'Auditor'); // name filled in from the email when left blank
+  const me = ok(rt.call(a, 'bootstrap')).user;
+  assert.equal(me.name, 'Auditor'); // filled in from the email when left blank
+  assert.equal(me.roleLabel, 'Internal Auditor');
+  assert.equal(me.access, 'ROE history, Audit log');
   ok(rt.call(a, 'audit', {}));
-  ok(rt.call(a, 'subsidiaries'));
-  assert.equal(rt.call(a, 'publish', { rates: OCT9 }).code, 'FORBIDDEN');
-  assert.equal(rt.call(a, 'settings').code, 'FORBIDDEN');
-  assert.equal(rt.call(a, 'users').code, 'FORBIDDEN');
+  ok(rt.call(a, 'history', {}));
+  for (const action of ['current', 'fluctuations', 'bookRates', 'subsidiaries', 'settings', 'categories', 'users']) {
+    assert.equal(rt.call(a, action, {}).code, 'FORBIDDEN', action);
+  }
 
-  // Changing the boxes applies on the next request, and the change is audited as before -> after.
-  ok(rt.call(admin, 'saveUser', { email: AUDITOR, perms: { SET_RATE: true } }));
+  // Ticking a page lets them work on it; changes apply on the next request and are audited.
+  ok(rt.call(admin, 'saveUser', { email: AUDITOR, pages: { PUBLISH: true, BOOK: true } }));
   ok(rt.call(a, 'publish', { rates: OCT9 }));
+  ok(rt.call(a, 'addBookRate', { date: '2026-10-14', usd: 1350, eur: 1520, gbp: 1790 }));
   assert.equal(rt.call(a, 'audit', {}).code, 'FORBIDDEN');
   const change = rt.sheet('Audit Log').toObjects().filter((r) => r.Action === 'UPDATE_USER').at(-1);
-  assert.match(change.Details, /Subsidiaries, Audit log -> Set rate/);
+  assert.match(change.Details, /ROE history, Audit log -> Publish ROE, Book rates/);
+});
 
-  // Ticking Admin gives everything.
-  ok(rt.call(admin, 'saveUser', { email: AUDITOR, perms: { ADMIN: true } }));
-  assert.equal(ok(rt.call(a, 'bootstrap')).user.roleLabel, 'Admin');
-  ok(rt.call(a, 'settings'));
+test('view only opens the ticked pages but blocks every change', () => {
+  const { rt, admin } = fresh();
+  ok(rt.call(admin, 'saveUser', { email: SETTER, pages: { PUBLISH: true, BOOK: true, SUBSIDIARIES: true, SETTINGS: true, DASHBOARD: true }, viewOnly: true }));
+  const v = signIn(rt, SETTER);
+  ok(rt.call(v, 'current'));
+  ok(rt.call(v, 'recipients'));
+  ok(rt.call(v, 'bookRates'));
+  ok(rt.call(v, 'subsidiaries'));
+  ok(rt.call(v, 'settings'));
+  assert.equal(rt.call(v, 'publish', { rates: OCT9 }).code, 'FORBIDDEN');
+  assert.equal(rt.call(v, 'addBookRate', { date: '2026-10-14', usd: 1350, eur: 1, gbp: 1 }).code, 'FORBIDDEN');
+  assert.equal(rt.call(v, 'saveSubsidiary', { code: 'FGT', name: 'x', headEmail: 'a@b.com' }).code, 'FORBIDDEN');
+  assert.equal(rt.call(v, 'saveSettings', { values: {} }).code, 'FORBIDDEN');
+  assert.match(rt.sheet('Audit Log').toObjects().at(-1).Details, /view only/);
+  assert.match(ok(rt.call(v, 'bootstrap')).user.access, /\(view only\)$/);
+});
+
+test('admin gives every page, and new people start with the default pages', () => {
+  const { rt, admin } = fresh();
+  ok(rt.call(admin, 'saveUser', { email: 'new.person@finchglow.com' }));
+  const n = signIn(rt, 'new.person@finchglow.com');
+  assert.equal(ok(rt.call(n, 'bootstrap')).user.access, 'Dashboard, Fluctuations, ROE history, Book rates');
+  ok(rt.call(admin, 'saveUser', { email: 'new.person@finchglow.com', admin: true, viewOnly: true }));
+  const u = ok(rt.call(n, 'bootstrap')).user;
+  assert.equal(u.admin, true);
+  assert.equal(u.viewOnly, false); // admin overrides view only
+  ok(rt.call(n, 'users'));
+  // Details only: keeps their access.
+  ok(rt.call(admin, 'saveUser', { email: 'new.person@finchglow.com', title: 'Treasury Lead', subsidiary: 'Travelden' }));
+  assert.equal(ok(rt.call(n, 'bootstrap')).user.admin, true);
 });
 
 test('blocking and removing people', () => {
   const { rt, admin } = fresh();
   const viewer = signIn(rt, VIEWER);
-  ok(rt.call(admin, 'saveUser', { email: VIEWER, perms: {}, blocked: true }));
+  ok(rt.call(admin, 'saveUser', { email: VIEWER, pages: { DASHBOARD: true }, blocked: true }));
   assert.equal(rt.call(viewer, 'current').code, 'AUTH');
   const before = rt.outbox.length;
   ok(rt.call(null, 'requestCode', { email: VIEWER }));
   assert.equal(rt.outbox.length, before, 'blocked people get no sign in code');
 
-  ok(rt.call(admin, 'saveUser', { email: VIEWER, perms: {}, blocked: false }));
+  ok(rt.call(admin, 'saveUser', { email: VIEWER, pages: { DASHBOARD: true }, blocked: false }));
   ok(rt.call(admin, 'removeUser', { email: VIEWER }));
   assert.ok(!ok(rt.call(admin, 'users')).users.some((u) => u.email === VIEWER));
   assert.equal(rt.sheet('Audit Log').toObjects().at(-1).Action, 'REMOVE_USER');
@@ -211,7 +239,7 @@ test('rows written with the old Role column still work', () => {
   const row = headers.map((h) => ({ Email: 'legacy@finchglow.com', 'Full Name': 'Legacy FC', Role: 'RATE_SETTER', Active: true }[h] ?? ''));
   sheet.appendRow(row);
   const t = signIn(rt, 'legacy@finchglow.com');
-  assert.equal(ok(rt.call(t, 'bootstrap')).user.roleLabel, 'Set rate');
+  assert.equal(ok(rt.call(t, 'bootstrap')).user.access, 'Dashboard, Fluctuations, Publish ROE, ROE history, Book rates');
   ok(rt.call(t, 'publish', { rates: OCT9 }));
 });
 

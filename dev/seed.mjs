@@ -18,6 +18,10 @@ export function seedDemo(rt) {
   ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.admin, name: 'Chief Financial Officer', role: 'ADMIN', subsidiary: 'Holdings' }));
   ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.setter, name: 'Financial Controller', role: 'RATE_SETTER', subsidiary: 'Holdings' }));
   ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.viewer, name: 'Head of Finance (FGT)', role: 'VIEWER', subsidiary: 'Finchglow Travels' }));
+  ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.admin, title: 'System Administrator' }));
+  ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.setter, title: 'Financial Controller' }));
+  ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.viewer, title: 'Head of Finance', pages: { DASHBOARD: true, FLUCTUATIONS: true, HISTORY: true }, viewOnly: true }));
+  ok(rt.call(admin, 'saveUser', { email: 'treasury@example.com', name: 'Treasury Desk', title: 'Treasury', subsidiary: 'Holdings', pages: { DASHBOARD: true, FLUCTUATIONS: true, PUBLISH: true, HISTORY: true, BOOK: true, AUDIT: true } }));
 
   // Placeholder head of finance addresses for the six subsidiaries that setup adds.
   [['FGT', 'Finchglow Travels'], ['FCM', 'FCM Travel Solutions'], ['FGH', 'Finchglow Holidays'], ['TVD', 'Travelden'], ['LAA', 'Lagos Aviation Academy'], ['FGB', 'Finchglobal']]

@@ -2,7 +2,7 @@
  * Web app entry point and API router.
  *
  * The browser calls `api(token, action, payload)` through google.script.run.
- * Each action declares the permission it needs and whether it writes, in
+ * Each action declares the pages it belongs to and whether it writes, in
  * which case it runs under the script lock so two people cannot publish at
  * the same moment.
  */
@@ -22,38 +22,38 @@ function include(name) {
 
 var API = {
   // Public (no session)
-  config: { perm: null, fn: function () { return publicConfig_(); } },
-  requestCode: { perm: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
-  verifyCode: { perm: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
-  logout: { perm: null, fn: function (u, p, token) { return logout_(token); } },
+  config: { access: null, fn: function () { return publicConfig_(); } },
+  requestCode: { access: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
+  verifyCode: { access: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
+  logout: { access: null, fn: function (u, p, token) { return logout_(token); } },
 
-  // Everyone signed in
-  bootstrap: { perm: 'VIEW', fn: function (u) { return bootstrap_(u); } },
-  current: { perm: 'VIEW', fn: function () { return getCurrent_(); } },
-  history: { perm: 'VIEW', fn: function (u, p) { return getHistory_(p); } },
-  fluctuations: { perm: 'VIEW', fn: function (u, p) { return getFluctuations_(p); } },
-  bookRates: { perm: 'VIEW', fn: function () { return getBookRates_(); } },
+  // Exchange rate pages
+  bootstrap: { access: 'SIGNED_IN', fn: function (u) { return bootstrap_(u); } },
+  current: { access: { pages: ['DASHBOARD', 'PUBLISH'] }, fn: function () { return getCurrent_(); } },
+  fluctuations: { access: { pages: ['DASHBOARD', 'FLUCTUATIONS'] }, fn: function (u, p) { return getFluctuations_(p); } },
+  history: { access: { pages: ['HISTORY'] }, fn: function (u, p) { return getHistory_(p); } },
+  bookRates: { access: { pages: ['BOOK'] }, fn: function () { return getBookRates_(); } },
+  addBookRate: { access: { pages: ['BOOK'], write: true }, lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
+  recipients: { access: { pages: ['PUBLISH'] }, fn: function () { return recipientSummary_(); } },
+  publish: { access: { pages: ['PUBLISH'], write: true }, lock: true, fn: function (u, p) { return publishRates_(u, p); } },
+  resend: { access: { pages: ['PUBLISH'], write: true }, lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
+  voidPublication: { access: { pages: ['PUBLISH'], write: true }, lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
 
-  // Set rate permission
-  publish: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return publishRates_(u, p); } },
-  resend: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
-  voidPublication: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
-  addBookRate: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
-  recipients: { perm: 'SET_RATE', fn: function () { return recipientSummary_(); } },
+  // Administration pages
+  audit: { access: { pages: ['AUDIT'] }, fn: function (u, p) { return getAudit_(p); } },
+  emailLog: { access: { pages: ['AUDIT'] }, fn: function (u, p) { return getEmailLog_(p); } },
+  subsidiaries: { access: { pages: ['SUBSIDIARIES'] }, fn: function () { return listSubsidiaries_(); } },
+  saveSubsidiary: { access: { pages: ['SUBSIDIARIES'], write: true }, lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
+  testEmail: { access: { pages: ['SUBSIDIARIES'], write: true }, lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
+  categories: { access: { pages: ['CATEGORIES'] }, fn: function () { return listCategoriesAdmin_(); } },
+  saveCategory: { access: { pages: ['CATEGORIES'], write: true }, lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
+  settings: { access: { pages: ['SETTINGS'] }, fn: function () { return getSettingsAdmin_(); } },
+  saveSettings: { access: { pages: ['SETTINGS'], write: true }, lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
 
-  // Admin pages (each needs its own permission; Admin has them all)
-  users: { perm: 'ADMIN', fn: function () { return listUsers_(); } },
-  saveUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return saveUser_(u, p); } },
-  removeUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return removeUser_(u, p); } },
-  subsidiaries: { perm: 'SUBSIDIARIES', fn: function () { return listSubsidiaries_(); } },
-  saveSubsidiary: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
-  testEmail: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
-  categories: { perm: 'SETTINGS', fn: function () { return listCategoriesAdmin_(); } },
-  saveCategory: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
-  settings: { perm: 'SETTINGS', fn: function () { return getSettingsAdmin_(); } },
-  saveSettings: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
-  audit: { perm: 'AUDIT', fn: function (u, p) { return getAudit_(p); } },
-  emailLog: { perm: 'AUDIT', fn: function (u, p) { return getEmailLog_(p); } }
+  // Users & access (admins only)
+  users: { access: { admin: true }, fn: function () { return listUsers_(); } },
+  saveUser: { access: { admin: true }, lock: true, fn: function (u, p) { return saveUser_(u, p); } },
+  removeUser: { access: { admin: true }, lock: true, fn: function (u, p) { return removeUser_(u, p); } }
 };
 
 function api(token, action, payload) {
@@ -61,7 +61,7 @@ function api(token, action, payload) {
     var def = Object.prototype.hasOwnProperty.call(API, action) ? API[action] : null;
     if (!def) throw new AppError('Unknown action.', 'NOT_FOUND');
     var run = function () {
-      var user = def.perm ? requireUser_(token, def.perm, action) : null;
+      var user = def.access ? requireUser_(token, def.access, action) : null;
       return def.fn(user, payload || {}, token);
     };
     return { ok: true, data: def.lock ? withLock_(run) : run() };
@@ -92,6 +92,7 @@ function bootstrap_(user) {
     validityNote: s.VALIDITY_NOTE,
     largeChangePercent: Number(s.LARGE_CHANGE_PERCENT) || 0,
     categories: groupCategories_(getCategories_(false)),
+    pages: PAGES.map(function (p) { return { key: p.key, label: p.label, group: p.group }; }),
     version: APP_VERSION
   };
 }

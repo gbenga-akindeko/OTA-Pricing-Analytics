@@ -8,7 +8,7 @@ function listUsers_() {
     var u = publicUser_(r);
     u.blocked = isBlocked_(r);
     u.lastLogin = iso_(r['Last Login']);
-    u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd MMM yyyy');
+    u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd MMM yyyy, HH:mm');
     return u;
   }).filter(function (u) { return u.email; });
   users.sort(function (a, b) {
@@ -17,22 +17,32 @@ function listUsers_() {
   });
   return {
     users: users,
-    permissions: PERMISSIONS.map(function (p) { return { key: p.key, label: p.label, help: p.help }; })
+    pages: PAGES.map(function (p) { return { key: p.key, label: p.label, group: p.group, help: p.help }; }),
+    defaultPages: DEFAULT_PAGES
   };
 }
 
-/** Turns the request into permission flags. Also accepts the older { role, active } shape. */
-function permsFromPayload_(payload) {
-  var perms = {};
-  if (payload.perms && typeof payload.perms === 'object') {
-    PERMISSIONS.forEach(function (p) { perms[p.key] = payload.perms[p.key] === true; });
-  } else {
-    var role = String(payload.role || 'VIEWER').toUpperCase();
-    if (!LEGACY_ROLES[role]) throw new AppError('Choose what this person can do.', 'VALIDATION');
-    PERMISSIONS.forEach(function (p) { perms[p.key] = LEGACY_ROLES[role].indexOf(p.key) !== -1; });
+function hasAccessFields_(payload) {
+  return payload.pages !== undefined || payload.admin !== undefined || payload.viewOnly !== undefined ||
+    payload.blocked !== undefined || payload.role !== undefined || payload.active !== undefined;
+}
+
+/** Turns the request into access. Also accepts the older { role } shape. */
+function accessFromPayload_(payload, existing) {
+  if (payload.pages === undefined && payload.admin === undefined && payload.viewOnly === undefined && payload.role === undefined) {
+    return existing ? userAccess_(existing) : { pages: pagesFromList_(DEFAULT_PAGES), admin: false, viewOnly: false };
   }
-  if (perms.ADMIN) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
-  return perms;
+  if (payload.role !== undefined && payload.pages === undefined) {
+    var legacy = LEGACY_ROLES[String(payload.role).toUpperCase()];
+    if (!legacy) throw new AppError('Choose what this person can do.', 'VALIDATION');
+    if (legacy === 'ADMIN') return { pages: allPages_(), admin: true, viewOnly: false };
+    return { pages: pagesFromList_(legacy), admin: false, viewOnly: false };
+  }
+  if (payload.admin === true) return { pages: allPages_(), admin: true, viewOnly: false };
+  var list = [];
+  var given = payload.pages || {};
+  PAGES.forEach(function (p) { if (given[p.key] === true) list.push(p.key); });
+  return { pages: pagesFromList_(list), admin: false, viewOnly: payload.viewOnly === true };
 }
 
 function nameFromEmail_(email) {
@@ -40,53 +50,66 @@ function nameFromEmail_(email) {
   return local.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
 }
 
+function detailFields_(payload, existing, email) {
+  var fields = {};
+  var name = String(payload.name || '').trim();
+  if (name) fields['Full Name'] = cellText_(name);
+  else if (!existing) fields['Full Name'] = cellText_(nameFromEmail_(email));
+  if (payload.title !== undefined) fields['Job Title'] = cellText_(String(payload.title).slice(0, 60));
+  if (payload.subsidiary !== undefined) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
+  return fields;
+}
+
+function accessFields_(access, blocked) {
+  return {
+    'Role': roleFromAccess_(access),
+    'Pages': PAGES.filter(function (p) { return access.pages[p.key]; }).map(function (p) { return p.key; }).join(', ') || 'NONE',
+    'Admin': access.admin,
+    'View Only': access.viewOnly,
+    'Blocked': blocked,
+    'Active': !blocked
+  };
+}
+
+/**
+ * Adds or updates a person. Sending only name / title / subsidiary changes
+ * their details and keeps their access. The main admin's access never changes.
+ */
 function saveUser_(user, payload) {
   payload = payload || {};
   var email = normEmail_(payload.email);
   if (!isEmail_(email)) throw new AppError('Enter a valid email address.', 'VALIDATION');
-  if (isMainAdmin_(email)) return saveMainAdminDetails_(user, email, payload);
-  var perms = permsFromPayload_(payload);
-  var blocked = payload.blocked === true || payload.active === false;
-  if (email === user.email && (blocked || !perms.ADMIN)) {
-    throw new AppError('You cannot remove your own admin access. Ask another admin.', 'VALIDATION');
+  var existing = findUser_(email);
+  var fields = detailFields_(payload, existing, email);
+
+  if (isMainAdmin_(email) || (existing && !hasAccessFields_(payload))) {
+    if (!existing) throw new AppError('Run setup again to add the main admin to the Users tab.', 'NOT_FOUND');
+    if (Object.keys(fields).length) {
+      updateRow_(SHEETS.USERS, existing._row, fields);
+      audit_(user.email, 'UPDATE_USER', { email: email, details: Object.keys(fields).join(', ') + ' updated' });
+    }
+    return { email: email };
   }
 
-  var existing = findUser_(email);
-  var name = String(payload.name || '').trim() || (existing && String(existing['Full Name'] || '').trim()) || nameFromEmail_(email);
-  var fields = {
-    'Email': email,
-    'Full Name': cellText_(name),
-    'Role': roleFromPerms_(perms),
-    'Blocked': blocked,
-    'Active': !blocked
-  };
-  if (payload.subsidiary !== undefined || !existing) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
-  PERMISSIONS.forEach(function (p) { fields[p.column] = perms[p.key]; });
+  var access = accessFromPayload_(payload, existing);
+  var blocked = payload.blocked === true || payload.active === false;
+  if (email === user.email && (blocked || !access.admin)) {
+    throw new AppError('You cannot remove your own admin access. Ask another admin.', 'VALIDATION');
+  }
+  var af = accessFields_(access, blocked);
+  for (var k in af) fields[k] = af[k];
 
-  var after = accessLabel_(perms, false) + (blocked ? ' (blocked)' : '');
+  var after = accessLabel_(access, false) + (blocked ? ', blocked' : '');
   if (existing) {
-    var before = accessLabel_(userPerms_(existing), false) + (isBlocked_(existing) ? ' (blocked)' : '');
+    var before = accessLabel_(userAccess_(existing), false) + (isBlocked_(existing) ? ', blocked' : '');
     updateRow_(SHEETS.USERS, existing._row, fields);
-    audit_(user.email, 'UPDATE_USER', { email: email, access: before + ' -> ' + after });
+    if (before !== after) audit_(user.email, 'UPDATE_USER', { email: email, access: before + ' -> ' + after });
   } else {
+    fields['Email'] = email;
     fields['Created At'] = new Date();
     fields['Created By'] = user.email;
     appendRows_(SHEETS.USERS, [fields]);
     audit_(user.email, 'ADD_USER', { email: email, access: after });
-  }
-  return { email: email };
-}
-
-/** The main admin's access never changes, but their name and subsidiary can. */
-function saveMainAdminDetails_(user, email, payload) {
-  var existing = findUser_(email);
-  if (!existing) throw new AppError('Run setup again to add the main admin to the Users tab.', 'NOT_FOUND');
-  var fields = {};
-  if (String(payload.name || '').trim()) fields['Full Name'] = cellText_(payload.name);
-  if (payload.subsidiary !== undefined) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
-  if (Object.keys(fields).length) {
-    updateRow_(SHEETS.USERS, existing._row, fields);
-    audit_(user.email, 'UPDATE_USER', { email: email, details: 'Name or subsidiary updated. Main admin access is always full.' });
   }
   return { email: email };
 }
@@ -97,7 +120,7 @@ function removeUser_(user, payload) {
   if (email === user.email) throw new AppError('You cannot remove yourself. Ask another admin.', 'VALIDATION');
   var existing = findUser_(email);
   if (!existing) throw new AppError('That person is not on the portal.', 'NOT_FOUND');
-  var before = accessLabel_(userPerms_(existing), false);
+  var before = accessLabel_(userAccess_(existing), false);
   deleteRow_(SHEETS.USERS, existing._row);
   audit_(user.email, 'REMOVE_USER', { email: email, access: before });
   return { email: email };

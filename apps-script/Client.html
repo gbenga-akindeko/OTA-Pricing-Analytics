@@ -31,12 +31,21 @@
     return '<span class="delta ' + (up ? 'up' : 'down') + '" title="' + (up ? 'Naira weaker' : 'Naira stronger') + '">' + (up ? '&#9650; +' : '&#9660; ') + fmt(change) + (opts.pct !== undefined && opts.pct !== null ? ' (' + pct(opts.pct) + ')' : '') + '</span>';
   }
   function initials(name) { return String(name || '?').split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(function (w) { return w[0].toUpperCase(); }).join(''); }
-  /** True when the signed in person has this permission. 'VIEW' is everyone. A list means any of them. */
-  function can(perm) {
+  /** Can the signed in person open this page? 'ADMIN' means Users & access. A list means any of them. */
+  function can(key) {
     if (!S.boot) return false;
-    if (!perm || perm === 'VIEW') return true;
-    if (Array.isArray(perm)) return perm.some(can);
-    return !!(S.boot.user.perms && S.boot.user.perms[perm]);
+    var u = S.boot.user;
+    if (!key || u.admin) return true;
+    if (Array.isArray(key)) return key.some(can);
+    if (key === 'ADMIN') return false;
+    return !!(u.pages && u.pages[key]);
+  }
+  /** Can they also add or change things on that page (ticked and not view only)? */
+  function canWork(key) {
+    return can(key) && (S.boot.user.admin || !S.boot.user.viewOnly);
+  }
+  function readOnlyNote() {
+    return '<div class="alert info" style="margin-bottom:16px">You have <b>view only</b> access here, so you can look but not change anything.</div>';
   }
   function isoDay(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); return isoDay(d); }
@@ -201,23 +210,23 @@
 
   var NAV = [
     { group: 'Exchange rates', items: [
-      { id: 'dashboard', label: 'Dashboard', icon: 'home' },
-      { id: 'fluctuations', label: 'Rate fluctuations', icon: 'chart' },
-      { id: 'publish', label: 'Publish ROE', icon: 'send', perm: 'SET_RATE' },
-      { id: 'history', label: 'ROE history', icon: 'clock' },
-      { id: 'book', label: 'Book rates', icon: 'book' }
+      { id: 'dashboard', label: 'Dashboard', icon: 'home', perm: 'DASHBOARD' },
+      { id: 'fluctuations', label: 'Rate fluctuations', icon: 'chart', perm: 'FLUCTUATIONS' },
+      { id: 'publish', label: 'Publish ROE', icon: 'send', perm: 'PUBLISH' },
+      { id: 'history', label: 'ROE history', icon: 'clock', perm: 'HISTORY' },
+      { id: 'book', label: 'Book rates', icon: 'book', perm: 'BOOK' }
     ] },
     { group: 'Finance', items: [
-      { id: 'bsp', label: 'BSP tracking', icon: 'plane', soon: true },
-      { id: 'receivables', label: 'Receivables', icon: 'wallet', soon: true },
-      { id: 'credit', label: 'Credit control', icon: 'shield', soon: true },
-      { id: 'invoices', label: 'Invoices', icon: 'file', soon: true }
+      { id: 'bsp', label: 'BSP tracking', icon: 'plane', soon: true, perm: 'BSP' },
+      { id: 'receivables', label: 'Receivables', icon: 'wallet', soon: true, perm: 'RECEIVABLES' },
+      { id: 'credit', label: 'Credit control', icon: 'shield', soon: true, perm: 'CREDIT' },
+      { id: 'invoices', label: 'Invoices', icon: 'file', soon: true, perm: 'INVOICES' }
     ] },
-    { group: 'Administration', perm: ['AUDIT', 'ADMIN', 'SUBSIDIARIES', 'SETTINGS'], items: [
+    { group: 'Administration', items: [
       { id: 'audit', label: 'Audit log', icon: 'log', perm: 'AUDIT' },
       { id: 'users', label: 'Users & access', icon: 'users', perm: 'ADMIN' },
       { id: 'subsidiaries', label: 'Subsidiaries', icon: 'building', perm: 'SUBSIDIARIES' },
-      { id: 'categories', label: 'Rate categories', icon: 'tag', perm: 'SETTINGS' },
+      { id: 'categories', label: 'Rate categories', icon: 'tag', perm: 'CATEGORIES' },
       { id: 'settings', label: 'Settings', icon: 'cog', perm: 'SETTINGS' }
     ] }
   ];
@@ -289,18 +298,22 @@
       S.config = boot.config;
       renderShell();
       var saved = store.get('fp_view');
-      go(saved && navItem(saved) && allowed(navItem(saved)) ? saved : 'dashboard');
+      go(saved && navItem(saved) && allowed(navItem(saved)) ? saved : firstAllowed());
     }).catch(function (e) { if (e.code !== 'AUTH') signedOut(e.error); });
   }
 
   function allowed(found) {
-    return can(found.group.perm) && can(found.item.perm);
+    return can(found.item.perm);
+  }
+  function firstAllowed() {
+    for (var g = 0; g < NAV.length; g++) for (var i = 0; i < NAV[g].items.length; i++) if (can(NAV[g].items[i].perm)) return NAV[g].items[i].id;
+    return null;
   }
 
   /* ---------- shell ---------- */
   function renderShell() {
     var u = S.boot.user;
-    var nav = NAV.filter(function (g) { return can(g.perm); }).map(function (g) {
+    var nav = NAV.filter(function (g) { return g.items.some(function (i) { return can(i.perm); }); }).map(function (g) {
       return '<h6>' + esc(g.group) + '</h6>' + g.items.filter(function (i) { return can(i.perm); }).map(function (i) {
         return '<button data-nav="' + i.id + '">' + icon(i.icon) + '<span>' + esc(i.label) + '</span>' + (i.soon ? '<span class="soon">SOON</span>' : '') + '</button>';
       }).join('');
@@ -333,8 +346,13 @@
   function go(view) {
     var found = navItem(view);
     if (!found || !allowed(found)) {
-      view = 'dashboard';
-      found = navItem('dashboard');
+      view = firstAllowed();
+      found = view && navItem(view);
+    }
+    if (!found) {
+      document.getElementById('page-title').textContent = 'Welcome';
+      document.getElementById('content').innerHTML = '<div class="card soon-hero"><h2 style="margin:0 0 6px">No pages yet</h2><p class="muted" style="margin:0">You can sign in, but no pages have been given to you. Ask an admin to tick the pages you need under Users &amp; access.</p></div>';
+      return;
     }
     S.view = view;
     store.set('fp_view', view);
@@ -344,6 +362,7 @@
     if (sb) sb.classList.remove('open');
     document.getElementById('page-title').textContent = found.item.label;
     var content = document.getElementById('content');
+    content.classList.toggle('wide', view === 'users');
     content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
     var fn = found.item.soon ? function (el) { return viewSoon(el, view); } : VIEWS[view];
     Promise.resolve(fn(content)).catch(function (e) {
@@ -477,7 +496,7 @@
         (latest ? '<div class="muted small">Published by ' + esc(shortName(latest.publishedBy)) + ' &middot; ' + emailBadge(latest.emailStatus) + '</div>' : '') + '</div>' +
         '<span class="spacer"></span>' +
         (latest ? '<button class="btn" id="copy-wa">' + icon('copy') + 'Copy for WhatsApp</button>' : '') +
-        (can('SET_RATE') ? '<button class="btn primary" data-nav="publish">' + icon('send') + 'Publish new rates</button>' : '') + '</div>' +
+        (canWork('PUBLISH') ? '<button class="btn primary" data-nav="publish">' + icon('send') + 'Publish new rates</button>' : '') + '</div>' +
         '<div class="grid g4" style="margin-bottom:16px">' + tiles + '</div>' +
         (latest && latest.note ? '<div class="alert" style="margin-bottom:16px"><b>Note:</b> ' + esc(latest.note) + '</div>' : '') +
         '<div class="grid g3" style="margin-bottom:16px">' + board + '</div>' +
@@ -571,7 +590,7 @@
       var requestId = rid();
       var groups = cur.groups;
 
-      el.innerHTML = '<form id="pub-form" novalidate><div class="pub-grid"><div class="stack">' +
+      el.innerHTML = (canWork('PUBLISH') ? '' : readOnlyNote()) + '<form id="pub-form" novalidate><div class="pub-grid"><div class="stack">' +
         '<div class="card"><div class="card-b grid g2">' +
         '<label class="field"><span>Effective date and time (' + esc(S.boot.timezone) + ')</span><input class="input" type="datetime-local" name="effectiveAt" value="' + nowInput(S.boot.timezone) + '" required></label>' +
         '<div class="small muted" style="align-self:end">Boxes start with the current rates. Change what moved, and clear a box to leave that category out of this broadcast.</div></div></div>' +
@@ -587,7 +606,7 @@
         '<label class="field"><span>Note on the broadcast</span><textarea class="input" name="note" maxlength="500">' + esc(S.boot.validityNote) + '</textarea></label>' +
         '<label class="check"><input type="checkbox" name="sendEmail" checked> Email the heads of finance now (' + rec.subsidiaries.length + ' subsidiar' + (rec.subsidiaries.length === 1 ? 'y' : 'ies') + (rec.internalCopy.length ? ' plus ' + rec.internalCopy.length + ' internal cop' + (rec.internalCopy.length === 1 ? 'y' : 'ies') : '') + ')</label>' +
         (rec.subsidiaries.length ? '' : '<div class="alert">No active subsidiaries have a head of finance email yet.' + (can('SUBSIDIARIES') ? ' Add them under <a href="#" data-nav="subsidiaries">Subsidiaries</a>.' : ' Ask an administrator to add them.') + '</div>') +
-        '<div class="row"><span class="spacer"></span><button class="btn primary" type="submit" id="pub-btn">' + icon('send') + 'Publish ROE</button></div>' +
+        '<div class="row"><span class="spacer"></span><button class="btn primary" type="submit" id="pub-btn"' + (canWork('PUBLISH') ? '' : ' disabled title="View only"') + '>' + icon('send') + 'Publish ROE</button></div>' +
         '</div></div></div>' +
         '<div class="stack sticky"><div class="card"><div class="card-h"><h3>Broadcast preview</h3><button class="btn sm" type="button" id="pv-copy">' + icon('copy') + 'Copy for WhatsApp</button></div>' +
         '<div class="card-b"><pre class="preview" id="pv"></pre></div></div>' +
@@ -659,7 +678,7 @@
       h.publications.forEach(function (p) { p.rates.forEach(function (r) {
         if (!cols.some(function (c) { return c.currency === r.currency && c.category === r.category; })) cols.push({ currency: r.currency, displayName: r.currency, category: r.category });
       }); });
-      var setter = can('SET_RATE');
+      var setter = canWork('PUBLISH');
       var rows = h.publications.map(function (p) {
         var map = {};
         p.rates.forEach(function (r) { map[r.currency + '||' + r.category] = r; });
@@ -716,7 +735,7 @@
         (b.entries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Effective date</th><th class="r">USD</th><th class="r">EUR</th><th class="r">GBP</th></tr></thead><tbody>' +
           b.entries.map(function (e) { return '<tr><td>' + esc(e.label) + '</td><td class="r num">' + fmt(e.usd) + '</td><td class="r num">' + fmt(e.eur) + '</td><td class="r num">' + fmt(e.gbp) + '</td></tr>'; }).join('') +
           '</tbody></table></div>' : '<div class="empty">No book rates yet.</div>') + '</div>' +
-        (can('SET_RATE') ? '<div class="card"><div class="card-h"><h3>Add a book rate</h3></div><form class="card-b stack" id="book-form" novalidate>' +
+        (canWork('BOOK') ? '<div class="card"><div class="card-h"><h3>Add a book rate</h3></div><form class="card-b stack" id="book-form" novalidate>' +
           '<p class="small muted" style="margin:0">Works like the "currency conv" tab: type the USD rate and the USD cross rates from OANDA, and EUR and GBP are worked out as ROUNDDOWN(USD / cross, 2). You can also type EUR and GBP directly.</p>' +
           '<div class="grid g2"><label class="field"><span>Effective date</span><input class="input" type="date" name="date" value="' + isoDay(new Date()) + '"></label>' +
           '<label class="field"><span>USD (NGN)</span><input class="input num" name="usd" inputmode="decimal" placeholder="1348"></label>' +
@@ -830,55 +849,77 @@
       if (!stillOn('users')) return;
       var d = res[0];
       var subs = res[1].subsidiaries;
-      var perms = d.permissions;
-      var cols = perms.concat([{ key: 'BLOCKED', label: 'Blocked', help: 'Cannot open the portal at all.' }]);
+      var pages = d.pages;
+      var flags = [
+        { key: 'ADMIN', label: 'Admin', help: 'Every page, plus this Users & access page. Can change anyone\'s access.' },
+        { key: 'VIEW_ONLY', label: 'View only', help: 'Opens the ticked pages but cannot add or change anything.' },
+        { key: 'BLOCKED', label: 'Blocked', help: 'Cannot open the portal at all.' }
+      ];
+      var groups = [];
+      pages.forEach(function (p) {
+        var g = groups[groups.length - 1];
+        if (!g || g.name !== p.group) groups.push(g = { name: p.group, count: 0 });
+        g.count++;
+      });
       var filter = S.userFilter || { q: '', special: false };
       S.userFilter = filter;
       var me = S.boot.user.email;
+      var defaultPages = {};
+      d.defaultPages.forEach(function (k) { defaultPages[k] = true; });
+
+      function isDefault(u) {
+        return !u.admin && !u.viewOnly && !u.blocked && pages.every(function (p) { return !!u.pages[p.key] === !!defaultPages[p.key]; });
+      }
 
       var legend = '<div class="card" style="margin-bottom:16px"><div class="card-b">' +
-        '<p class="small muted" style="margin:0 0 14px">Everyone on this list can sign in and see the rates, ROE history, fluctuations and book rates (view only). Tick a box to give someone more, or block them. Changes apply as soon as you press Save.</p>' +
-        '<div class="perm-legend">' + cols.map(function (c) { return '<div><b>' + esc(c.label) + '</b> &middot; ' + esc(c.help) + '</div>'; }).join('') + '</div></div></div>';
+        '<p class="small muted" style="margin:0 0 14px">Tick the pages each person can open and work on. New people start with ' +
+        esc(pages.filter(function (p) { return defaultPages[p.key]; }).map(function (p) { return p.label; }).join(', ')) +
+        '. Changes apply the moment you press Save, and every change is written to the audit log.</p>' +
+        '<div class="perm-legend">' + pages.filter(function (p) { return p.help !== 'Coming soon.'; }).concat(flags).map(function (c) {
+          return '<div><b>' + esc(c.label) + '</b> &middot; ' + esc(c.help) + '</div>';
+        }).join('') + '<div><b>BSP, Receivables, Credit control, Invoices</b> &middot; Coming soon. Tick them now and people get them as soon as each page goes live.</div></div></div></div>';
 
-      var add = '<form class="card" id="u-add-form" style="margin-bottom:16px" novalidate><div class="card-h"><h3>Add a person</h3></div><div class="card-b">' +
-        '<div class="grid g3"><label class="field"><span>Work email</span><input class="input" name="email" type="email" required placeholder="name@finchglowholdings.com"></label>' +
-        '<label class="field"><span>Full name (optional)</span><input class="input" name="name"></label>' +
-        '<label class="field"><span>Subsidiary</span><input class="input" name="subsidiary" list="sub-list"><datalist id="sub-list"><option value="Holdings">' + subs.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join('') + '</datalist></label></div>' +
-        '<div class="row" style="margin-top:12px">' + perms.map(function (p) { return '<label class="check"><input type="checkbox" name="p_' + p.key + '"> ' + esc(p.label) + '</label>'; }).join('') +
-        '<span class="spacer"></span><button class="btn primary" type="submit">' + icon('plus') + 'Add person</button></div></div></form>';
+      function badge(text, cls) { return ' <span class="badge ' + (cls || '') + '">' + esc(text) + '</span>'; }
 
       function rowHtml(u, i) {
         var cells;
         var actions;
         if (u.isMainAdmin) {
-          cells = perms.map(function () { return '<td class="c"><span class="tick" aria-label="Yes">&#10003;</span></td>'; }).join('') + '<td class="c"><span class="muted">&mdash;</span></td>';
-          actions = '<td class="r small muted">Always full access</td>';
+          cells = pages.map(function () { return '<td class="c"><span class="tick" aria-label="Yes">&#10003;</span></td>'; }).join('') +
+            '<td class="c"><span class="tick" aria-label="Yes">&#10003;</span></td><td class="c muted">&ndash;</td><td class="c muted">&ndash;</td>';
+          actions = '<td class="r small muted" style="white-space:nowrap">Always full access</td>';
         } else {
-          cells = cols.map(function (c) {
-            var on = c.key === 'BLOCKED' ? u.blocked : !!u.perms[c.key];
-            var lockedByAdmin = c.key !== 'ADMIN' && c.key !== 'BLOCKED' && u.perms.ADMIN;
-            var self = u.email === me && (c.key === 'ADMIN' || c.key === 'BLOCKED');
-            return '<td class="c"><input type="checkbox" class="perm-box" data-i="' + i + '" data-k="' + c.key + '" aria-label="' + esc(c.label + ' for ' + u.name) + '"' + (on || lockedByAdmin ? ' checked' : '') + (lockedByAdmin || self ? ' disabled' : '') + '></td>';
-          }).join('');
-          actions = '<td class="r" style="white-space:nowrap"><button class="btn sm primary" data-save="' + i + '" disabled>Save</button> <button class="btn sm danger" data-remove="' + i + '"' + (u.email === me ? ' disabled title="You cannot remove yourself"' : '') + '>Remove</button></td>';
+          var self = u.email === me;
+          cells = pages.map(function (p) {
+            return '<td class="c"><input type="checkbox" class="perm-box" data-i="' + i + '" data-k="' + p.key + '" aria-label="' + esc(p.label + ' for ' + u.name) + '"' +
+              (u.pages[p.key] ? ' checked' : '') + (u.admin ? ' disabled' : '') + '></td>';
+          }).join('') +
+            '<td class="c"><input type="checkbox" class="perm-box" data-i="' + i + '" data-k="ADMIN" aria-label="Admin for ' + esc(u.name) + '"' + (u.admin ? ' checked' : '') + (self ? ' disabled' : '') + '></td>' +
+            '<td class="c"><input type="checkbox" class="perm-box" data-i="' + i + '" data-k="VIEW_ONLY" aria-label="View only for ' + esc(u.name) + '"' + (u.viewOnly ? ' checked' : '') + (u.admin ? ' disabled' : '') + '></td>' +
+            '<td class="c"><input type="checkbox" class="perm-box" data-i="' + i + '" data-k="BLOCKED" aria-label="Blocked for ' + esc(u.name) + '"' + (u.blocked ? ' checked' : '') + (self ? ' disabled' : '') + '></td>';
+          actions = '<td class="r" style="white-space:nowrap"><button class="btn sm primary" data-save="' + i + '" disabled>Save</button> <button class="btn sm danger" data-remove="' + i + '"' + (self ? ' disabled title="You cannot remove yourself"' : '') + '>Remove</button></td>';
         }
-        var badge = u.isMainAdmin ? ' <span class="badge info">MAIN ADMIN</span>' : u.blocked ? ' <span class="badge bad">BLOCKED</span>' : '';
-        var meta = esc(u.email) + (u.subsidiary ? ' &middot; ' + esc(u.subsidiary) : '') + (u.lastLoginLabel ? ' &middot; Last signed in ' + esc(u.lastLoginLabel) : ' &middot; Never signed in');
-        return '<tr data-row="' + i + '" class="' + (u.blocked ? 'is-blocked' : '') + '"><td><b>' + esc(u.name) + '</b>' + badge + '<div class="small muted">' + meta + '</div></td>' + cells + actions + '</tr>';
+        var badges = (u.title ? badge(u.title) : '') + (u.isMainAdmin ? badge('MAIN ADMIN', 'info') : '') + (u.email === me ? badge('You', 'info') : '') + (u.blocked ? badge('BLOCKED', 'bad') : '');
+        var meta = esc(u.email) + ' &middot; ' + (u.lastLoginLabel ? 'last opened ' + esc(u.lastLoginLabel) : 'never opened') + (u.subsidiary ? ' &middot; covers ' + esc(u.subsidiary.toUpperCase()) : '');
+        return '<tr data-row="' + i + '" class="' + (u.blocked ? 'is-blocked' : '') + '"><td class="who"><b>' + esc(u.name) + '</b>' + badges +
+          '<div class="small muted">' + meta + ' &middot; <a href="#" data-details="' + i + '">Edit details</a></div></td>' + cells + actions + '</tr>';
       }
 
-      el.innerHTML = legend + add +
-        '<div class="card"><div class="card-h"><input class="input" id="u-q" style="flex:1;min-width:200px" placeholder="Search a name or email..." value="' + esc(filter.q) + '">' +
-        '<label class="check small"><input type="checkbox" id="u-special"' + (filter.special ? ' checked' : '') + '> Only people with special access</label><span class="small muted" id="u-count"></span></div>' +
-        '<div class="table-wrap"><table class="t perm-table"><thead><tr><th>User</th>' + cols.map(function (c) { return '<th class="c">' + esc(c.label) + '</th>'; }).join('') + '<th></th></tr></thead>' +
+      el.innerHTML = legend +
+        '<div class="card"><div class="card-h"><input class="input" id="u-q" style="flex:1;min-width:200px;max-width:360px" placeholder="Search a name or email..." value="' + esc(filter.q) + '">' +
+        '<label class="check small"><input type="checkbox" id="u-special"' + (filter.special ? ' checked' : '') + '> Only people with special access</label><span class="small muted" id="u-count"></span>' +
+        '<span class="spacer"></span><button class="btn primary sm" id="u-add">' + icon('plus') + 'Add person</button></div>' +
+        '<div class="table-wrap"><table class="t perm-table"><thead>' +
+        '<tr class="grp"><th></th>' + groups.map(function (g) { return '<th colspan="' + g.count + '" class="c">' + esc(g.name) + '</th>'; }).join('') + '<th colspan="3" class="c">Access</th><th></th></tr>' +
+        '<tr><th>Person</th>' + pages.map(function (p) { return '<th class="c">' + esc(p.label) + '</th>'; }).join('') +
+        flags.map(function (f) { return '<th class="c">' + esc(f.label) + '</th>'; }).join('') + '<th></th></tr></thead>' +
         '<tbody>' + d.users.map(rowHtml).join('') + '</tbody></table></div></div>';
 
-      function special(u) { return u.isMainAdmin || u.blocked || perms.some(function (p) { return u.perms[p.key]; }); }
       function applyFilter() {
         var q = filter.q.trim().toLowerCase();
         var shown = 0;
         d.users.forEach(function (u, i) {
-          var visible = (!q || (u.name + ' ' + u.email).toLowerCase().indexOf(q) !== -1) && (!filter.special || special(u));
+          var visible = (!q || (u.name + ' ' + u.email + ' ' + u.title).toLowerCase().indexOf(q) !== -1) && (!filter.special || u.isMainAdmin || !isDefault(u));
           el.querySelector('tr[data-row="' + i + '"]').style.display = visible ? '' : 'none';
           if (visible) shown++;
         });
@@ -888,26 +929,28 @@
       document.getElementById('u-q').addEventListener('input', function (ev) { filter.q = ev.target.value; applyFilter(); });
       document.getElementById('u-special').addEventListener('change', function (ev) { filter.special = ev.target.checked; applyFilter(); });
 
+      function box(i, k) { return el.querySelector('.perm-box[data-i="' + i + '"][data-k="' + k + '"]'); }
       function readRow(i) {
-        var out = { perms: {}, blocked: false };
-        el.querySelectorAll('.perm-box[data-i="' + i + '"]').forEach(function (b) {
-          if (b.getAttribute('data-k') === 'BLOCKED') out.blocked = b.checked;
-          else out.perms[b.getAttribute('data-k')] = b.checked;
-        });
+        var out = { pages: {}, admin: box(i, 'ADMIN').checked, viewOnly: box(i, 'VIEW_ONLY').checked, blocked: box(i, 'BLOCKED').checked };
+        pages.forEach(function (p) { out.pages[p.key] = box(i, p.key).checked; });
         return out;
       }
-      el.querySelectorAll('.perm-box').forEach(function (box) {
-        box.addEventListener('change', function () {
-          var i = box.getAttribute('data-i');
-          // Admin includes everything, so show the other boxes ticked and locked while it is on.
-          if (box.getAttribute('data-k') === 'ADMIN') {
-            el.querySelectorAll('.perm-box[data-i="' + i + '"]').forEach(function (b) {
-              var k = b.getAttribute('data-k');
-              if (k === 'ADMIN' || k === 'BLOCKED') return;
-              if (box.checked) { b.checked = true; b.disabled = true; } else { b.disabled = false; b.checked = !!d.users[i].perms[k] && !d.users[i].perms.ADMIN; }
+      el.querySelectorAll('.perm-box').forEach(function (b) {
+        b.addEventListener('change', function () {
+          var i = b.getAttribute('data-i');
+          var u = d.users[i];
+          // Admin includes every page and cannot be view only, so lock those boxes while it is ticked.
+          if (b.getAttribute('data-k') === 'ADMIN') {
+            pages.forEach(function (p) {
+              var x = box(i, p.key);
+              x.disabled = b.checked;
+              x.checked = b.checked ? true : (u.admin ? !!defaultPages[p.key] : !!u.pages[p.key]);
             });
+            var vo = box(i, 'VIEW_ONLY');
+            vo.disabled = b.checked;
+            if (b.checked) vo.checked = false;
           }
-          el.querySelector('tr[data-row="' + i + '"]').classList.toggle('is-blocked', readRow(i).blocked);
+          el.querySelector('tr[data-row="' + i + '"]').classList.toggle('is-blocked', box(i, 'BLOCKED').checked);
           el.querySelector('[data-save="' + i + '"]').disabled = false;
         });
       });
@@ -917,7 +960,7 @@
           var u = d.users[i];
           var r = readRow(i);
           b.disabled = true;
-          api('saveUser', { email: u.email, perms: r.perms, blocked: r.blocked }).then(function () {
+          api('saveUser', { email: u.email, pages: r.pages, admin: r.admin, viewOnly: r.viewOnly, blocked: r.blocked }).then(function () {
             toast('Saved access for ' + u.name + '.');
             go('users');
           }).catch(function (e) { b.disabled = false; fail(e); });
@@ -932,16 +975,43 @@
           });
         };
       });
-      document.getElementById('u-add-form').addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        var f = ev.target;
-        var p = {};
-        perms.forEach(function (x) { p[x.key] = f['p_' + x.key].checked; });
-        api('saveUser', { email: f.email.value, name: f.name.value, subsidiary: f.subsidiary.value, perms: p, blocked: false }).then(function (r) {
-          toast(r.email + ' can now sign in.');
-          go('users');
-        }).catch(fail);
+
+      var subList = '<datalist id="sub-list"><option value="Holdings">' + subs.map(function (x) { return '<option value="' + esc(x.name) + '">'; }).join('') + '</datalist>';
+      function detailFields(u) {
+        return '<div class="grid g2"><label class="field"><span>Full name</span><input class="input" name="name" value="' + esc(u ? u.name : '') + '" placeholder="Taken from the email if left blank"></label>' +
+          '<label class="field"><span>Job title (shown as a badge)</span><input class="input" name="title" maxlength="60" value="' + esc(u ? u.title : '') + '" placeholder="e.g. Financial Controller"></label></div>' +
+          '<label class="field"><span>Subsidiary they cover</span><input class="input" name="subsidiary" list="sub-list" value="' + esc(u ? u.subsidiary : '') + '">' + subList + '</label>';
+      }
+      el.querySelectorAll('[data-details]').forEach(function (a) {
+        a.onclick = function (ev) {
+          ev.preventDefault();
+          var u = d.users[Number(a.getAttribute('data-details'))];
+          modal({ title: 'Edit details for ' + u.name, body: '<p class="small muted" style="margin:0">' + esc(u.email) + '. This only changes the name, job title and subsidiary. Their page access stays the same.</p>' + detailFields(u),
+            onOk: function (f) {
+              return api('saveUser', { email: u.email, name: f.name.value, title: f.title.value, subsidiary: f.subsidiary.value }).then(function () { toast('Details saved.'); go('users'); });
+            }
+          });
+        };
       });
+      document.getElementById('u-add').onclick = function () {
+        var byGroup = groups.map(function (g) {
+          return '<div><div class="eyebrow" style="margin-bottom:6px">' + esc(g.name) + '</div><div class="row">' + pages.filter(function (p) { return p.group === g.name; }).map(function (p) {
+            return '<label class="check small"><input type="checkbox" name="pg_' + p.key + '"' + (defaultPages[p.key] ? ' checked' : '') + '> ' + esc(p.label) + '</label>';
+          }).join('') + '</div></div>';
+        }).join('');
+        modal({ title: 'Add a person', ok: 'Add person',
+          body: '<label class="field"><span>Work email</span><input class="input" name="email" type="email" required placeholder="name@finchglowholdings.com"></label>' + detailFields(null) +
+            '<div class="stack" style="margin-top:4px">' + byGroup + '</div>' +
+            '<div class="row"><label class="check small"><input type="checkbox" name="admin"> <b>Admin</b> (every page, plus Users &amp; access)</label>' +
+            '<label class="check small"><input type="checkbox" name="viewOnly"> <b>View only</b> (look, no changes)</label></div>',
+          onOk: function (f) {
+            var pg = {};
+            pages.forEach(function (p) { pg[p.key] = f['pg_' + p.key].checked; });
+            return api('saveUser', { email: f.email.value, name: f.name.value, title: f.title.value, subsidiary: f.subsidiary.value, pages: pg, admin: f.admin.checked, viewOnly: f.viewOnly.checked, blocked: false })
+              .then(function (r) { toast(r.email + ' can now sign in.'); go('users'); });
+          }
+        });
+      };
     });
   };
 
@@ -972,6 +1042,11 @@
               .then(function () { toast('Subsidiary saved.'); go('subsidiaries'); });
           }
         });
+      }
+      if (!canWork('SUBSIDIARIES')) {
+        el.querySelectorAll('#s-add, [data-edit], [data-test]').forEach(function (b) { b.remove(); });
+        el.insertAdjacentHTML('afterbegin', readOnlyNote());
+        return;
       }
       document.getElementById('s-add').onclick = function () { edit(null); };
       el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { edit(d.subsidiaries[Number(b.getAttribute('data-edit'))]); }; });
@@ -1007,6 +1082,11 @@
           }
         });
       }
+      if (!canWork('CATEGORIES')) {
+        el.querySelectorAll('#c-add, [data-edit]').forEach(function (b) { b.remove(); });
+        el.insertAdjacentHTML('afterbegin', readOnlyNote());
+        return;
+      }
       document.getElementById('c-add').onclick = function () { edit(null); };
       el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { edit(d.categories[Number(b.getAttribute('data-edit'))]); }; });
     });
@@ -1026,6 +1106,12 @@
         '<div class="stack"><div class="card tile accent"><div class="label">Emails left today</div><div class="value num">' + (d.mailQuota === null ? '-' : fmt(d.mailQuota)) + '</div>' +
         '<div class="meta">Google limits how many recipients the portal can email per day (about 100 for a personal Gmail account, 1,500 for Google Workspace). Each head of finance, CC and sign in code counts as one.</div></div>' +
         '<div class="card"><div class="card-b small">Version ' + esc(d.version) + '. The data lives in the linked Google Sheet. Do not rename its tabs or header rows.</div></div></div></div>';
+      if (!canWork('SETTINGS')) {
+        el.querySelectorAll('#set-form input, #set-form textarea').forEach(function (i) { i.readOnly = true; });
+        el.querySelectorAll('#set-form button[type=submit]').forEach(function (b) { b.remove(); });
+        el.insertAdjacentHTML('afterbegin', readOnlyNote());
+        return;
+      }
       document.getElementById('set-form').addEventListener('submit', function (ev) {
         ev.preventDefault();
         var values = {};

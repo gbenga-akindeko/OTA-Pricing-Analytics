@@ -15,32 +15,49 @@ var APP_VERSION = '1.0.0';
 var DATABASE_SPREADSHEET_ID = '1xu7O0dDZmUKZ6Kd7HcswG-QQw4ybACEJOixoGGPcw7w';
 
 /**
- * Access is a set of tick boxes per person on the Users & access page.
- * Everyone who can sign in sees rates, history, fluctuations and book rates
- * ("view only"). Each permission below adds to that. Admin includes all of
- * them. The main admin (whoever ran setup first) always has full access.
+ * Access is set page by page on the Users & access page. Ticking a page lets
+ * the person open it and work on it. "View only" lets them open their ticked
+ * pages without adding or changing anything. "Admin" gives every page plus
+ * Users & access. The main admin (whoever ran setup first) always has full access.
  */
-var PERMISSIONS = [
-  { key: 'SET_RATE', column: 'Can Set Rate', label: 'Set rate', help: 'Publishes the ROE, resends or voids broadcasts and adds book rates.' },
-  { key: 'SUBSIDIARIES', column: 'Can Manage Subsidiaries', label: 'Subsidiaries', help: 'Manages subsidiaries, heads of finance and CC lists, and sends test emails.' },
-  { key: 'AUDIT', column: 'Can View Audit', label: 'Audit log', help: 'Sees the audit log of sign ins and changes, and the email delivery log.' },
-  { key: 'SETTINGS', column: 'Can Edit Settings', label: 'Settings', help: 'Changes portal settings and rate categories.' },
-  { key: 'ADMIN', column: 'Is Admin', label: 'Admin', help: 'Opens this page and can change anyone\'s access. Includes every permission above.' }
+var PAGES = [
+  { key: 'DASHBOARD', label: 'Dashboard', group: 'Exchange rates', help: 'Current ROE, 30 day movement and recent broadcasts.' },
+  { key: 'FLUCTUATIONS', label: 'Fluctuations', group: 'Exchange rates', help: 'Rate movement over 7 days to 1 year, highs, lows and biggest moves.' },
+  { key: 'PUBLISH', label: 'Publish ROE', group: 'Exchange rates', help: 'Sets the official ROE and emails it. Also resends or voids broadcasts on ROE history.' },
+  { key: 'HISTORY', label: 'ROE history', group: 'Exchange rates', help: 'Every past broadcast, with CSV export.' },
+  { key: 'BOOK', label: 'Book rates', group: 'Exchange rates', help: 'The Rate Log. Working on it means adding book rates.' },
+  { key: 'BSP', label: 'BSP tracking', group: 'Finance', help: 'Coming soon.' },
+  { key: 'RECEIVABLES', label: 'Receivables', group: 'Finance', help: 'Coming soon.' },
+  { key: 'CREDIT', label: 'Credit control', group: 'Finance', help: 'Coming soon.' },
+  { key: 'INVOICES', label: 'Invoices', group: 'Finance', help: 'Coming soon.' },
+  { key: 'AUDIT', label: 'Audit log', group: 'Administration', help: 'Sign ins, changes and the email delivery log.' },
+  { key: 'SUBSIDIARIES', label: 'Subsidiaries', group: 'Administration', help: 'Subsidiaries, heads of finance, CC lists and test emails.' },
+  { key: 'CATEGORIES', label: 'Rate categories', group: 'Administration', help: 'The lines on each broadcast and their order.' },
+  { key: 'SETTINGS', label: 'Settings', group: 'Administration', help: 'Company name, logo, broadcast note and email options.' }
 ];
 
-/** Older role names, still understood when reading the sheet or the API. */
+/** Pages a new person gets unless the admin changes them. */
+var DEFAULT_PAGES = ['DASHBOARD', 'FLUCTUATIONS', 'HISTORY', 'BOOK'];
+
+/** Older role names and permission columns, still understood when reading the sheet or the API. */
 var LEGACY_ROLES = {
-  ADMIN: ['SET_RATE', 'SUBSIDIARIES', 'AUDIT', 'SETTINGS', 'ADMIN'],
-  RATE_SETTER: ['SET_RATE'],
-  VIEWER: []
+  ADMIN: 'ADMIN',
+  RATE_SETTER: DEFAULT_PAGES.concat(['PUBLISH']),
+  VIEWER: DEFAULT_PAGES
 };
+var LEGACY_COLUMNS = [
+  ['Can Set Rate', ['PUBLISH']],
+  ['Can Manage Subsidiaries', ['SUBSIDIARIES']],
+  ['Can View Audit', ['AUDIT']],
+  ['Can Edit Settings', ['SETTINGS', 'CATEGORIES']]
+];
 
 /** Tabs in the database spreadsheet. Headers are matched by name, so columns can be reordered. */
 var SHEETS = {
   SETTINGS: { name: 'Settings', headers: ['Key', 'Value', 'Description'] },
   USERS: {
     name: 'Users',
-    headers: ['Email', 'Full Name', 'Subsidiary', 'Role', 'Can Set Rate', 'Can Manage Subsidiaries', 'Can View Audit', 'Can Edit Settings', 'Is Admin', 'Blocked', 'Active', 'Created At', 'Created By', 'Last Login']
+    headers: ['Email', 'Full Name', 'Job Title', 'Subsidiary', 'Role', 'Pages', 'Admin', 'View Only', 'Blocked', 'Active', 'Created At', 'Created By', 'Last Login']
   },
   SUBSIDIARIES: {
     name: 'Subsidiaries',
@@ -374,15 +391,32 @@ function hasCell_(row, column) {
 }
 
 /** Permission flags for a Users row. Rows without tick box columns fall back to the old Role column. */
-function userPerms_(row) {
-  var perms = {};
-  var explicit = PERMISSIONS.some(function (p) { return hasCell_(row, p.column); });
-  var legacy = LEGACY_ROLES[String(row['Role'] || '').trim().toUpperCase()] || [];
-  PERMISSIONS.forEach(function (p) {
-    perms[p.key] = explicit ? toBool_(row[p.column]) : legacy.indexOf(p.key) !== -1;
-  });
-  if (perms.ADMIN || isMainAdmin_(row['Email'])) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
-  return perms;
+function allPages_() {
+  var pages = {};
+  PAGES.forEach(function (p) { pages[p.key] = true; });
+  return pages;
+}
+
+function pagesFromList_(list) {
+  var pages = {};
+  PAGES.forEach(function (p) { pages[p.key] = list.indexOf(p.key) !== -1; });
+  return pages;
+}
+
+/** Pages, admin and view only flags for a Users row. Older rows fall back to their Role or permission columns. */
+function userAccess_(row) {
+  if (isMainAdmin_(row['Email']) || toBool_(row['Admin']) || toBool_(row['Is Admin'])) {
+    return { pages: allPages_(), admin: true, viewOnly: false };
+  }
+  if (hasCell_(row, 'Pages') || hasCell_(row, 'View Only')) {
+    var list = String(row['Pages'] || '').toUpperCase().split(/[\s,;]+/).filter(function (k) { return k; });
+    return { pages: pagesFromList_(list), admin: false, viewOnly: toBool_(row['View Only']) };
+  }
+  var legacy = LEGACY_ROLES[String(row['Role'] || 'VIEWER').trim().toUpperCase()] || DEFAULT_PAGES;
+  if (legacy === 'ADMIN') return { pages: allPages_(), admin: true, viewOnly: false };
+  var keys = legacy.slice();
+  LEGACY_COLUMNS.forEach(function (c) { if (toBool_(row[c[0]])) keys = keys.concat(c[1]); });
+  return { pages: pagesFromList_(keys), admin: false, viewOnly: false };
 }
 
 function isBlocked_(row) {
@@ -391,29 +425,35 @@ function isBlocked_(row) {
   return hasCell_(row, 'Active') && !toBool_(row['Active']);
 }
 
-/** Short description of someone's access, e.g. "Admin" or "Set rate, Audit log". */
-function accessLabel_(perms, main) {
+/** Short description of someone's access, e.g. "Admin" or "Dashboard, ROE history (view only)". */
+function accessLabel_(access, main) {
   if (main) return 'Main admin';
-  if (perms.ADMIN) return 'Admin';
-  var labels = PERMISSIONS.filter(function (p) { return perms[p.key]; }).map(function (p) { return p.label; });
-  return labels.length ? labels.join(', ') : 'View only';
+  if (access.admin) return 'Admin';
+  var labels = PAGES.filter(function (p) { return access.pages[p.key]; }).map(function (p) { return p.label; });
+  var text = labels.length === PAGES.length ? 'All pages' : labels.length ? labels.join(', ') : 'No pages';
+  return text + (access.viewOnly ? ' (view only)' : '');
 }
 
 /** Role column kept in the sheet for people reading it directly. */
-function roleFromPerms_(perms) {
-  return perms.ADMIN ? 'ADMIN' : perms.SET_RATE ? 'RATE_SETTER' : 'VIEWER';
+function roleFromAccess_(access) {
+  return access.admin ? 'ADMIN' : access.pages.PUBLISH && !access.viewOnly ? 'RATE_SETTER' : 'VIEWER';
 }
 
 function publicUser_(row) {
-  var perms = userPerms_(row);
+  var access = userAccess_(row);
   var main = isMainAdmin_(row['Email']);
+  var title = String(row['Job Title'] || '').trim();
   return {
     email: normEmail_(row['Email']),
     name: String(row['Full Name'] || '').trim() || normEmail_(row['Email']),
-    perms: perms,
+    title: title,
+    pages: access.pages,
+    admin: access.admin,
+    viewOnly: access.viewOnly,
     isMainAdmin: main,
-    role: roleFromPerms_(perms),
-    roleLabel: accessLabel_(perms, main),
+    access: accessLabel_(access, main),
+    role: roleFromAccess_(access),
+    roleLabel: title || (main ? 'Main admin' : access.admin ? 'Admin' : access.viewOnly ? 'View only' : 'Portal user'),
     subsidiary: String(row['Subsidiary'] || '')
   };
 }
@@ -484,8 +524,15 @@ function verifyCode_(payload) {
   return { token: token, user: publicUser_(user) };
 }
 
-/** Resolves a session token to an active user who holds `perm` ('VIEW' means any signed in user). */
-function requireUser_(token, perm, action) {
+/**
+ * Resolves a session token to an active user and checks the action's access rule:
+ *   'SIGNED_IN'                 any signed in person
+ *   { pages: [...] }            at least one of these pages ticked
+ *   { pages: [...], write: 1 }  ...and not view only
+ *   { admin: true }             admin only
+ * Admins pass every rule.
+ */
+function requireUser_(token, rule, action) {
   var expired = new AppError('Your session has expired. Please sign in again.', 'AUTH');
   if (!token || typeof token !== 'string' || token.length < 32) throw expired;
   var cache = CacheService.getScriptCache();
@@ -504,12 +551,22 @@ function requireUser_(token, perm, action) {
     throw new AppError('Your portal access has been removed. Contact the CFO office.', 'AUTH');
   }
   var user = publicUser_(row);
-  if (perm !== 'VIEW' && !user.perms[perm]) {
-    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ' without ' + perm + ' (has: ' + user.roleLabel + ')');
+  var reason = accessProblem_(user, rule);
+  if (reason) {
+    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ': ' + reason + ' (has: ' + user.access + ')');
     throw new AppError('You do not have permission to do that.', 'FORBIDDEN');
   }
   cache.put(key, raw, AUTH.SESSION_IDLE_SECONDS);
   return user;
+}
+
+/** Why `user` fails `rule`, or '' when they pass. */
+function accessProblem_(user, rule) {
+  if (!rule || rule === 'SIGNED_IN' || user.admin) return '';
+  if (rule.admin) return 'needs Admin';
+  if (rule.pages && !rule.pages.some(function (k) { return user.pages[k]; })) return 'needs page ' + rule.pages.join(' or ');
+  if (rule.write && user.viewOnly) return 'view only';
+  return '';
 }
 
 function logout_(token) {
@@ -1262,7 +1319,7 @@ function listUsers_() {
     var u = publicUser_(r);
     u.blocked = isBlocked_(r);
     u.lastLogin = iso_(r['Last Login']);
-    u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd MMM yyyy');
+    u.lastLoginLabel = fmtDate_(r['Last Login'], 'dd MMM yyyy, HH:mm');
     return u;
   }).filter(function (u) { return u.email; });
   users.sort(function (a, b) {
@@ -1271,22 +1328,32 @@ function listUsers_() {
   });
   return {
     users: users,
-    permissions: PERMISSIONS.map(function (p) { return { key: p.key, label: p.label, help: p.help }; })
+    pages: PAGES.map(function (p) { return { key: p.key, label: p.label, group: p.group, help: p.help }; }),
+    defaultPages: DEFAULT_PAGES
   };
 }
 
-/** Turns the request into permission flags. Also accepts the older { role, active } shape. */
-function permsFromPayload_(payload) {
-  var perms = {};
-  if (payload.perms && typeof payload.perms === 'object') {
-    PERMISSIONS.forEach(function (p) { perms[p.key] = payload.perms[p.key] === true; });
-  } else {
-    var role = String(payload.role || 'VIEWER').toUpperCase();
-    if (!LEGACY_ROLES[role]) throw new AppError('Choose what this person can do.', 'VALIDATION');
-    PERMISSIONS.forEach(function (p) { perms[p.key] = LEGACY_ROLES[role].indexOf(p.key) !== -1; });
+function hasAccessFields_(payload) {
+  return payload.pages !== undefined || payload.admin !== undefined || payload.viewOnly !== undefined ||
+    payload.blocked !== undefined || payload.role !== undefined || payload.active !== undefined;
+}
+
+/** Turns the request into access. Also accepts the older { role } shape. */
+function accessFromPayload_(payload, existing) {
+  if (payload.pages === undefined && payload.admin === undefined && payload.viewOnly === undefined && payload.role === undefined) {
+    return existing ? userAccess_(existing) : { pages: pagesFromList_(DEFAULT_PAGES), admin: false, viewOnly: false };
   }
-  if (perms.ADMIN) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
-  return perms;
+  if (payload.role !== undefined && payload.pages === undefined) {
+    var legacy = LEGACY_ROLES[String(payload.role).toUpperCase()];
+    if (!legacy) throw new AppError('Choose what this person can do.', 'VALIDATION');
+    if (legacy === 'ADMIN') return { pages: allPages_(), admin: true, viewOnly: false };
+    return { pages: pagesFromList_(legacy), admin: false, viewOnly: false };
+  }
+  if (payload.admin === true) return { pages: allPages_(), admin: true, viewOnly: false };
+  var list = [];
+  var given = payload.pages || {};
+  PAGES.forEach(function (p) { if (given[p.key] === true) list.push(p.key); });
+  return { pages: pagesFromList_(list), admin: false, viewOnly: payload.viewOnly === true };
 }
 
 function nameFromEmail_(email) {
@@ -1294,53 +1361,66 @@ function nameFromEmail_(email) {
   return local.replace(/\b\w/g, function (c) { return c.toUpperCase(); });
 }
 
+function detailFields_(payload, existing, email) {
+  var fields = {};
+  var name = String(payload.name || '').trim();
+  if (name) fields['Full Name'] = cellText_(name);
+  else if (!existing) fields['Full Name'] = cellText_(nameFromEmail_(email));
+  if (payload.title !== undefined) fields['Job Title'] = cellText_(String(payload.title).slice(0, 60));
+  if (payload.subsidiary !== undefined) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
+  return fields;
+}
+
+function accessFields_(access, blocked) {
+  return {
+    'Role': roleFromAccess_(access),
+    'Pages': PAGES.filter(function (p) { return access.pages[p.key]; }).map(function (p) { return p.key; }).join(', ') || 'NONE',
+    'Admin': access.admin,
+    'View Only': access.viewOnly,
+    'Blocked': blocked,
+    'Active': !blocked
+  };
+}
+
+/**
+ * Adds or updates a person. Sending only name / title / subsidiary changes
+ * their details and keeps their access. The main admin's access never changes.
+ */
 function saveUser_(user, payload) {
   payload = payload || {};
   var email = normEmail_(payload.email);
   if (!isEmail_(email)) throw new AppError('Enter a valid email address.', 'VALIDATION');
-  if (isMainAdmin_(email)) return saveMainAdminDetails_(user, email, payload);
-  var perms = permsFromPayload_(payload);
-  var blocked = payload.blocked === true || payload.active === false;
-  if (email === user.email && (blocked || !perms.ADMIN)) {
-    throw new AppError('You cannot remove your own admin access. Ask another admin.', 'VALIDATION');
+  var existing = findUser_(email);
+  var fields = detailFields_(payload, existing, email);
+
+  if (isMainAdmin_(email) || (existing && !hasAccessFields_(payload))) {
+    if (!existing) throw new AppError('Run setup again to add the main admin to the Users tab.', 'NOT_FOUND');
+    if (Object.keys(fields).length) {
+      updateRow_(SHEETS.USERS, existing._row, fields);
+      audit_(user.email, 'UPDATE_USER', { email: email, details: Object.keys(fields).join(', ') + ' updated' });
+    }
+    return { email: email };
   }
 
-  var existing = findUser_(email);
-  var name = String(payload.name || '').trim() || (existing && String(existing['Full Name'] || '').trim()) || nameFromEmail_(email);
-  var fields = {
-    'Email': email,
-    'Full Name': cellText_(name),
-    'Role': roleFromPerms_(perms),
-    'Blocked': blocked,
-    'Active': !blocked
-  };
-  if (payload.subsidiary !== undefined || !existing) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
-  PERMISSIONS.forEach(function (p) { fields[p.column] = perms[p.key]; });
+  var access = accessFromPayload_(payload, existing);
+  var blocked = payload.blocked === true || payload.active === false;
+  if (email === user.email && (blocked || !access.admin)) {
+    throw new AppError('You cannot remove your own admin access. Ask another admin.', 'VALIDATION');
+  }
+  var af = accessFields_(access, blocked);
+  for (var k in af) fields[k] = af[k];
 
-  var after = accessLabel_(perms, false) + (blocked ? ' (blocked)' : '');
+  var after = accessLabel_(access, false) + (blocked ? ', blocked' : '');
   if (existing) {
-    var before = accessLabel_(userPerms_(existing), false) + (isBlocked_(existing) ? ' (blocked)' : '');
+    var before = accessLabel_(userAccess_(existing), false) + (isBlocked_(existing) ? ', blocked' : '');
     updateRow_(SHEETS.USERS, existing._row, fields);
-    audit_(user.email, 'UPDATE_USER', { email: email, access: before + ' -> ' + after });
+    if (before !== after) audit_(user.email, 'UPDATE_USER', { email: email, access: before + ' -> ' + after });
   } else {
+    fields['Email'] = email;
     fields['Created At'] = new Date();
     fields['Created By'] = user.email;
     appendRows_(SHEETS.USERS, [fields]);
     audit_(user.email, 'ADD_USER', { email: email, access: after });
-  }
-  return { email: email };
-}
-
-/** The main admin's access never changes, but their name and subsidiary can. */
-function saveMainAdminDetails_(user, email, payload) {
-  var existing = findUser_(email);
-  if (!existing) throw new AppError('Run setup again to add the main admin to the Users tab.', 'NOT_FOUND');
-  var fields = {};
-  if (String(payload.name || '').trim()) fields['Full Name'] = cellText_(payload.name);
-  if (payload.subsidiary !== undefined) fields['Subsidiary'] = cellText_(payload.subsidiary || '');
-  if (Object.keys(fields).length) {
-    updateRow_(SHEETS.USERS, existing._row, fields);
-    audit_(user.email, 'UPDATE_USER', { email: email, details: 'Name or subsidiary updated. Main admin access is always full.' });
   }
   return { email: email };
 }
@@ -1351,7 +1431,7 @@ function removeUser_(user, payload) {
   if (email === user.email) throw new AppError('You cannot remove yourself. Ask another admin.', 'VALIDATION');
   var existing = findUser_(email);
   if (!existing) throw new AppError('That person is not on the portal.', 'NOT_FOUND');
-  var before = accessLabel_(userPerms_(existing), false);
+  var before = accessLabel_(userAccess_(existing), false);
   deleteRow_(SHEETS.USERS, existing._row);
   audit_(user.email, 'REMOVE_USER', { email: email, access: before });
   return { email: email };
@@ -1602,9 +1682,11 @@ function setup() {
   var props = PropertiesService.getScriptProperties();
   if (me && !props.getProperty('MAIN_ADMIN')) props.setProperty('MAIN_ADMIN', me);
   if (me && !findUser_(me)) {
-    var row = { 'Email': me, 'Full Name': me, 'Role': 'ADMIN', 'Subsidiary': 'Holdings', 'Blocked': false, 'Active': true, 'Created At': new Date(), 'Created By': 'setup' };
-    PERMISSIONS.forEach(function (p) { row[p.column] = true; });
-    appendRows_(SHEETS.USERS, [row]);
+    appendRows_(SHEETS.USERS, [{
+      'Email': me, 'Full Name': me, 'Job Title': 'System Administrator', 'Subsidiary': 'Holdings', 'Role': 'ADMIN',
+      'Pages': PAGES.map(function (p) { return p.key; }).join(', '), 'Admin': true, 'View Only': false,
+      'Blocked': false, 'Active': true, 'Created At': new Date(), 'Created By': 'setup'
+    }]);
   }
 
   authSecret_();
@@ -1639,7 +1721,7 @@ function formatSheets_() {
  * Web app entry point and API router.
  *
  * The browser calls `api(token, action, payload)` through google.script.run.
- * Each action declares the permission it needs and whether it writes, in
+ * Each action declares the pages it belongs to and whether it writes, in
  * which case it runs under the script lock so two people cannot publish at
  * the same moment.
  */
@@ -1659,38 +1741,38 @@ function include(name) {
 
 var API = {
   // Public (no session)
-  config: { perm: null, fn: function () { return publicConfig_(); } },
-  requestCode: { perm: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
-  verifyCode: { perm: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
-  logout: { perm: null, fn: function (u, p, token) { return logout_(token); } },
+  config: { access: null, fn: function () { return publicConfig_(); } },
+  requestCode: { access: null, lock: true, fn: function (u, p) { return requestCode_(p); } },
+  verifyCode: { access: null, lock: true, fn: function (u, p) { return verifyCode_(p); } },
+  logout: { access: null, fn: function (u, p, token) { return logout_(token); } },
 
-  // Everyone signed in
-  bootstrap: { perm: 'VIEW', fn: function (u) { return bootstrap_(u); } },
-  current: { perm: 'VIEW', fn: function () { return getCurrent_(); } },
-  history: { perm: 'VIEW', fn: function (u, p) { return getHistory_(p); } },
-  fluctuations: { perm: 'VIEW', fn: function (u, p) { return getFluctuations_(p); } },
-  bookRates: { perm: 'VIEW', fn: function () { return getBookRates_(); } },
+  // Exchange rate pages
+  bootstrap: { access: 'SIGNED_IN', fn: function (u) { return bootstrap_(u); } },
+  current: { access: { pages: ['DASHBOARD', 'PUBLISH'] }, fn: function () { return getCurrent_(); } },
+  fluctuations: { access: { pages: ['DASHBOARD', 'FLUCTUATIONS'] }, fn: function (u, p) { return getFluctuations_(p); } },
+  history: { access: { pages: ['HISTORY'] }, fn: function (u, p) { return getHistory_(p); } },
+  bookRates: { access: { pages: ['BOOK'] }, fn: function () { return getBookRates_(); } },
+  addBookRate: { access: { pages: ['BOOK'], write: true }, lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
+  recipients: { access: { pages: ['PUBLISH'] }, fn: function () { return recipientSummary_(); } },
+  publish: { access: { pages: ['PUBLISH'], write: true }, lock: true, fn: function (u, p) { return publishRates_(u, p); } },
+  resend: { access: { pages: ['PUBLISH'], write: true }, lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
+  voidPublication: { access: { pages: ['PUBLISH'], write: true }, lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
 
-  // Set rate permission
-  publish: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return publishRates_(u, p); } },
-  resend: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return broadcastPublication_(String(p && p.id), u, 'RESEND'); } },
-  voidPublication: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return voidPublication_(u, p); } },
-  addBookRate: { perm: 'SET_RATE', lock: true, fn: function (u, p) { return addBookRate_(u, p); } },
-  recipients: { perm: 'SET_RATE', fn: function () { return recipientSummary_(); } },
+  // Administration pages
+  audit: { access: { pages: ['AUDIT'] }, fn: function (u, p) { return getAudit_(p); } },
+  emailLog: { access: { pages: ['AUDIT'] }, fn: function (u, p) { return getEmailLog_(p); } },
+  subsidiaries: { access: { pages: ['SUBSIDIARIES'] }, fn: function () { return listSubsidiaries_(); } },
+  saveSubsidiary: { access: { pages: ['SUBSIDIARIES'], write: true }, lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
+  testEmail: { access: { pages: ['SUBSIDIARIES'], write: true }, lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
+  categories: { access: { pages: ['CATEGORIES'] }, fn: function () { return listCategoriesAdmin_(); } },
+  saveCategory: { access: { pages: ['CATEGORIES'], write: true }, lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
+  settings: { access: { pages: ['SETTINGS'] }, fn: function () { return getSettingsAdmin_(); } },
+  saveSettings: { access: { pages: ['SETTINGS'], write: true }, lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
 
-  // Admin pages (each needs its own permission; Admin has them all)
-  users: { perm: 'ADMIN', fn: function () { return listUsers_(); } },
-  saveUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return saveUser_(u, p); } },
-  removeUser: { perm: 'ADMIN', lock: true, fn: function (u, p) { return removeUser_(u, p); } },
-  subsidiaries: { perm: 'SUBSIDIARIES', fn: function () { return listSubsidiaries_(); } },
-  saveSubsidiary: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return saveSubsidiary_(u, p); } },
-  testEmail: { perm: 'SUBSIDIARIES', lock: true, fn: function (u, p) { return sendTestEmail_(u, p); } },
-  categories: { perm: 'SETTINGS', fn: function () { return listCategoriesAdmin_(); } },
-  saveCategory: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveCategory_(u, p); } },
-  settings: { perm: 'SETTINGS', fn: function () { return getSettingsAdmin_(); } },
-  saveSettings: { perm: 'SETTINGS', lock: true, fn: function (u, p) { return saveSettings_(u, p); } },
-  audit: { perm: 'AUDIT', fn: function (u, p) { return getAudit_(p); } },
-  emailLog: { perm: 'AUDIT', fn: function (u, p) { return getEmailLog_(p); } }
+  // Users & access (admins only)
+  users: { access: { admin: true }, fn: function () { return listUsers_(); } },
+  saveUser: { access: { admin: true }, lock: true, fn: function (u, p) { return saveUser_(u, p); } },
+  removeUser: { access: { admin: true }, lock: true, fn: function (u, p) { return removeUser_(u, p); } }
 };
 
 function api(token, action, payload) {
@@ -1698,7 +1780,7 @@ function api(token, action, payload) {
     var def = Object.prototype.hasOwnProperty.call(API, action) ? API[action] : null;
     if (!def) throw new AppError('Unknown action.', 'NOT_FOUND');
     var run = function () {
-      var user = def.perm ? requireUser_(token, def.perm, action) : null;
+      var user = def.access ? requireUser_(token, def.access, action) : null;
       return def.fn(user, payload || {}, token);
     };
     return { ok: true, data: def.lock ? withLock_(run) : run() };
@@ -1729,6 +1811,7 @@ function bootstrap_(user) {
     validityNote: s.VALIDITY_NOTE,
     largeChangePercent: Number(s.LARGE_CHANGE_PERCENT) || 0,
     categories: groupCategories_(getCategories_(false)),
+    pages: PAGES.map(function (p) { return { key: p.key, label: p.label, group: p.group }; }),
     version: APP_VERSION
   };
 }

@@ -61,15 +61,32 @@ function hasCell_(row, column) {
 }
 
 /** Permission flags for a Users row. Rows without tick box columns fall back to the old Role column. */
-function userPerms_(row) {
-  var perms = {};
-  var explicit = PERMISSIONS.some(function (p) { return hasCell_(row, p.column); });
-  var legacy = LEGACY_ROLES[String(row['Role'] || '').trim().toUpperCase()] || [];
-  PERMISSIONS.forEach(function (p) {
-    perms[p.key] = explicit ? toBool_(row[p.column]) : legacy.indexOf(p.key) !== -1;
-  });
-  if (perms.ADMIN || isMainAdmin_(row['Email'])) PERMISSIONS.forEach(function (p) { perms[p.key] = true; });
-  return perms;
+function allPages_() {
+  var pages = {};
+  PAGES.forEach(function (p) { pages[p.key] = true; });
+  return pages;
+}
+
+function pagesFromList_(list) {
+  var pages = {};
+  PAGES.forEach(function (p) { pages[p.key] = list.indexOf(p.key) !== -1; });
+  return pages;
+}
+
+/** Pages, admin and view only flags for a Users row. Older rows fall back to their Role or permission columns. */
+function userAccess_(row) {
+  if (isMainAdmin_(row['Email']) || toBool_(row['Admin']) || toBool_(row['Is Admin'])) {
+    return { pages: allPages_(), admin: true, viewOnly: false };
+  }
+  if (hasCell_(row, 'Pages') || hasCell_(row, 'View Only')) {
+    var list = String(row['Pages'] || '').toUpperCase().split(/[\s,;]+/).filter(function (k) { return k; });
+    return { pages: pagesFromList_(list), admin: false, viewOnly: toBool_(row['View Only']) };
+  }
+  var legacy = LEGACY_ROLES[String(row['Role'] || 'VIEWER').trim().toUpperCase()] || DEFAULT_PAGES;
+  if (legacy === 'ADMIN') return { pages: allPages_(), admin: true, viewOnly: false };
+  var keys = legacy.slice();
+  LEGACY_COLUMNS.forEach(function (c) { if (toBool_(row[c[0]])) keys = keys.concat(c[1]); });
+  return { pages: pagesFromList_(keys), admin: false, viewOnly: false };
 }
 
 function isBlocked_(row) {
@@ -78,29 +95,35 @@ function isBlocked_(row) {
   return hasCell_(row, 'Active') && !toBool_(row['Active']);
 }
 
-/** Short description of someone's access, e.g. "Admin" or "Set rate, Audit log". */
-function accessLabel_(perms, main) {
+/** Short description of someone's access, e.g. "Admin" or "Dashboard, ROE history (view only)". */
+function accessLabel_(access, main) {
   if (main) return 'Main admin';
-  if (perms.ADMIN) return 'Admin';
-  var labels = PERMISSIONS.filter(function (p) { return perms[p.key]; }).map(function (p) { return p.label; });
-  return labels.length ? labels.join(', ') : 'View only';
+  if (access.admin) return 'Admin';
+  var labels = PAGES.filter(function (p) { return access.pages[p.key]; }).map(function (p) { return p.label; });
+  var text = labels.length === PAGES.length ? 'All pages' : labels.length ? labels.join(', ') : 'No pages';
+  return text + (access.viewOnly ? ' (view only)' : '');
 }
 
 /** Role column kept in the sheet for people reading it directly. */
-function roleFromPerms_(perms) {
-  return perms.ADMIN ? 'ADMIN' : perms.SET_RATE ? 'RATE_SETTER' : 'VIEWER';
+function roleFromAccess_(access) {
+  return access.admin ? 'ADMIN' : access.pages.PUBLISH && !access.viewOnly ? 'RATE_SETTER' : 'VIEWER';
 }
 
 function publicUser_(row) {
-  var perms = userPerms_(row);
+  var access = userAccess_(row);
   var main = isMainAdmin_(row['Email']);
+  var title = String(row['Job Title'] || '').trim();
   return {
     email: normEmail_(row['Email']),
     name: String(row['Full Name'] || '').trim() || normEmail_(row['Email']),
-    perms: perms,
+    title: title,
+    pages: access.pages,
+    admin: access.admin,
+    viewOnly: access.viewOnly,
     isMainAdmin: main,
-    role: roleFromPerms_(perms),
-    roleLabel: accessLabel_(perms, main),
+    access: accessLabel_(access, main),
+    role: roleFromAccess_(access),
+    roleLabel: title || (main ? 'Main admin' : access.admin ? 'Admin' : access.viewOnly ? 'View only' : 'Portal user'),
     subsidiary: String(row['Subsidiary'] || '')
   };
 }
@@ -171,8 +194,15 @@ function verifyCode_(payload) {
   return { token: token, user: publicUser_(user) };
 }
 
-/** Resolves a session token to an active user who holds `perm` ('VIEW' means any signed in user). */
-function requireUser_(token, perm, action) {
+/**
+ * Resolves a session token to an active user and checks the action's access rule:
+ *   'SIGNED_IN'                 any signed in person
+ *   { pages: [...] }            at least one of these pages ticked
+ *   { pages: [...], write: 1 }  ...and not view only
+ *   { admin: true }             admin only
+ * Admins pass every rule.
+ */
+function requireUser_(token, rule, action) {
   var expired = new AppError('Your session has expired. Please sign in again.', 'AUTH');
   if (!token || typeof token !== 'string' || token.length < 32) throw expired;
   var cache = CacheService.getScriptCache();
@@ -191,12 +221,22 @@ function requireUser_(token, perm, action) {
     throw new AppError('Your portal access has been removed. Contact the CFO office.', 'AUTH');
   }
   var user = publicUser_(row);
-  if (perm !== 'VIEW' && !user.perms[perm]) {
-    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ' without ' + perm + ' (has: ' + user.roleLabel + ')');
+  var reason = accessProblem_(user, rule);
+  if (reason) {
+    audit_(user.email, 'ACCESS_DENIED', 'Tried ' + (action || 'a restricted action') + ': ' + reason + ' (has: ' + user.access + ')');
     throw new AppError('You do not have permission to do that.', 'FORBIDDEN');
   }
   cache.put(key, raw, AUTH.SESSION_IDLE_SECONDS);
   return user;
+}
+
+/** Why `user` fails `rule`, or '' when they pass. */
+function accessProblem_(user, rule) {
+  if (!rule || rule === 'SIGNED_IN' || user.admin) return '';
+  if (rule.admin) return 'needs Admin';
+  if (rule.pages && !rule.pages.some(function (k) { return user.pages[k]; })) return 'needs page ' + rule.pages.join(' or ');
+  if (rule.write && user.viewOnly) return 'view only';
+  return '';
 }
 
 function logout_(token) {

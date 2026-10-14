@@ -252,8 +252,20 @@
   /* Users & access grid */
   .perm-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 24px; font-size: 13px; color: var(--text-2); }
   .perm-legend b { color: var(--text); }
-  table.perm-table th.c, table.perm-table td.c { text-align: center; width: 92px; }
+  .content.wide { max-width: none; }
+  table.perm-table th.c, table.perm-table td.c { text-align: center; min-width: 58px; padding-left: 4px; padding-right: 4px; }
+  table.perm-table th { white-space: normal; font-size: 9.5px; line-height: 1.25; vertical-align: bottom; }
+  table.perm-table tr.grp th { background: var(--surface-tint); color: var(--primary); border-left: 1px solid var(--border); font-size: 10px; letter-spacing: .08em; }
   table.perm-table td { vertical-align: middle; }
+  table.perm-table td.who { min-width: 250px; max-width: 320px; }
+  table.perm-table td.who .badge { font-size: 10px; padding: 1px 7px; }
+  /* Keep the person and the Save / Remove buttons in view while the page columns scroll. */
+  table.perm-table th:first-child, table.perm-table td:first-child { position: sticky; left: 0; z-index: 2; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
+  table.perm-table th:first-child { background: var(--surface-2); }
+  table.perm-table tr.grp th:first-child { background: var(--surface-tint); }
+  table.perm-table th:last-child, table.perm-table td:last-child { position: sticky; right: 0; z-index: 2; background: var(--surface); box-shadow: -1px 0 0 var(--border); }
+  table.perm-table th:last-child { background: var(--surface-2); }
+  table.perm-table tr.grp th:last-child { background: var(--surface-tint); }
   .perm-box { width: 18px; height: 18px; accent-color: var(--fg-orange); cursor: pointer; }
   .perm-box:disabled { cursor: not-allowed; opacity: .6; }
   .tick { color: var(--primary); font-weight: 800; font-size: 17px; }

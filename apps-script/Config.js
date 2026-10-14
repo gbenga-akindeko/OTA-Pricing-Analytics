@@ -12,32 +12,49 @@ var APP_VERSION = '1.0.0';
 var DATABASE_SPREADSHEET_ID = '1xu7O0dDZmUKZ6Kd7HcswG-QQw4ybACEJOixoGGPcw7w';
 
 /**
- * Access is a set of tick boxes per person on the Users & access page.
- * Everyone who can sign in sees rates, history, fluctuations and book rates
- * ("view only"). Each permission below adds to that. Admin includes all of
- * them. The main admin (whoever ran setup first) always has full access.
+ * Access is set page by page on the Users & access page. Ticking a page lets
+ * the person open it and work on it. "View only" lets them open their ticked
+ * pages without adding or changing anything. "Admin" gives every page plus
+ * Users & access. The main admin (whoever ran setup first) always has full access.
  */
-var PERMISSIONS = [
-  { key: 'SET_RATE', column: 'Can Set Rate', label: 'Set rate', help: 'Publishes the ROE, resends or voids broadcasts and adds book rates.' },
-  { key: 'SUBSIDIARIES', column: 'Can Manage Subsidiaries', label: 'Subsidiaries', help: 'Manages subsidiaries, heads of finance and CC lists, and sends test emails.' },
-  { key: 'AUDIT', column: 'Can View Audit', label: 'Audit log', help: 'Sees the audit log of sign ins and changes, and the email delivery log.' },
-  { key: 'SETTINGS', column: 'Can Edit Settings', label: 'Settings', help: 'Changes portal settings and rate categories.' },
-  { key: 'ADMIN', column: 'Is Admin', label: 'Admin', help: 'Opens this page and can change anyone\'s access. Includes every permission above.' }
+var PAGES = [
+  { key: 'DASHBOARD', label: 'Dashboard', group: 'Exchange rates', help: 'Current ROE, 30 day movement and recent broadcasts.' },
+  { key: 'FLUCTUATIONS', label: 'Fluctuations', group: 'Exchange rates', help: 'Rate movement over 7 days to 1 year, highs, lows and biggest moves.' },
+  { key: 'PUBLISH', label: 'Publish ROE', group: 'Exchange rates', help: 'Sets the official ROE and emails it. Also resends or voids broadcasts on ROE history.' },
+  { key: 'HISTORY', label: 'ROE history', group: 'Exchange rates', help: 'Every past broadcast, with CSV export.' },
+  { key: 'BOOK', label: 'Book rates', group: 'Exchange rates', help: 'The Rate Log. Working on it means adding book rates.' },
+  { key: 'BSP', label: 'BSP tracking', group: 'Finance', help: 'Coming soon.' },
+  { key: 'RECEIVABLES', label: 'Receivables', group: 'Finance', help: 'Coming soon.' },
+  { key: 'CREDIT', label: 'Credit control', group: 'Finance', help: 'Coming soon.' },
+  { key: 'INVOICES', label: 'Invoices', group: 'Finance', help: 'Coming soon.' },
+  { key: 'AUDIT', label: 'Audit log', group: 'Administration', help: 'Sign ins, changes and the email delivery log.' },
+  { key: 'SUBSIDIARIES', label: 'Subsidiaries', group: 'Administration', help: 'Subsidiaries, heads of finance, CC lists and test emails.' },
+  { key: 'CATEGORIES', label: 'Rate categories', group: 'Administration', help: 'The lines on each broadcast and their order.' },
+  { key: 'SETTINGS', label: 'Settings', group: 'Administration', help: 'Company name, logo, broadcast note and email options.' }
 ];
 
-/** Older role names, still understood when reading the sheet or the API. */
+/** Pages a new person gets unless the admin changes them. */
+var DEFAULT_PAGES = ['DASHBOARD', 'FLUCTUATIONS', 'HISTORY', 'BOOK'];
+
+/** Older role names and permission columns, still understood when reading the sheet or the API. */
 var LEGACY_ROLES = {
-  ADMIN: ['SET_RATE', 'SUBSIDIARIES', 'AUDIT', 'SETTINGS', 'ADMIN'],
-  RATE_SETTER: ['SET_RATE'],
-  VIEWER: []
+  ADMIN: 'ADMIN',
+  RATE_SETTER: DEFAULT_PAGES.concat(['PUBLISH']),
+  VIEWER: DEFAULT_PAGES
 };
+var LEGACY_COLUMNS = [
+  ['Can Set Rate', ['PUBLISH']],
+  ['Can Manage Subsidiaries', ['SUBSIDIARIES']],
+  ['Can View Audit', ['AUDIT']],
+  ['Can Edit Settings', ['SETTINGS', 'CATEGORIES']]
+];
 
 /** Tabs in the database spreadsheet. Headers are matched by name, so columns can be reordered. */
 var SHEETS = {
   SETTINGS: { name: 'Settings', headers: ['Key', 'Value', 'Description'] },
   USERS: {
     name: 'Users',
-    headers: ['Email', 'Full Name', 'Subsidiary', 'Role', 'Can Set Rate', 'Can Manage Subsidiaries', 'Can View Audit', 'Can Edit Settings', 'Is Admin', 'Blocked', 'Active', 'Created At', 'Created By', 'Last Login']
+    headers: ['Email', 'Full Name', 'Job Title', 'Subsidiary', 'Role', 'Pages', 'Admin', 'View Only', 'Blocked', 'Active', 'Created At', 'Created By', 'Last Login']
   },
   SUBSIDIARIES: {
     name: 'Subsidiaries',
