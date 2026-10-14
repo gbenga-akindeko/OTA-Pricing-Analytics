@@ -8,6 +8,9 @@
 
 var APP_VERSION = '1.0.0';
 
+/** "DATABASE SHEET FOR EXCHANGE RATE WEB PORTAL". A SPREADSHEET_ID script property overrides it. */
+var DATABASE_SPREADSHEET_ID = '1xu7O0dDZmUKZ6Kd7HcswG-QQw4ybACEJOixoGGPcw7w';
+
 /** Roles, lowest to highest. A user can do everything a lower role can do. */
 var ROLES = {
   VIEWER: { rank: 1, label: 'Viewer' },

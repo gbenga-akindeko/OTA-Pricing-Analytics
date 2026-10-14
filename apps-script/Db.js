@@ -3,8 +3,13 @@
  * first row holds the column headers.
  */
 
+/**
+ * The database sheet: the SPREADSHEET_ID script property if set, otherwise the
+ * Finance database sheet in Config.js. This works whether or not the script
+ * project is attached to the sheet.
+ */
 function getSpreadsheet_() {
-  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID') || DATABASE_SPREADSHEET_ID;
   if (id) return SpreadsheetApp.openById(id);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) throw new AppError('Database sheet not found. Set the SPREADSHEET_ID script property.', 'CONFIG');

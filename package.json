@@ -8,8 +8,9 @@
     "test": "node --test \"test/**/*.test.mjs\"",
     "dev": "node dev/server.mjs",
     "embed-logo": "node dev/embed-logo.mjs",
-    "push": "clasp push",
-    "deploy": "clasp push && clasp deploy --description \"Finance Portal\""
+    "push": "clasp push --force",
+    "deploy": "clasp push --force && clasp deploy --description \"Finance Portal\"",
+    "bundle": "node dev/bundle.mjs"
   },
   "engines": {
     "node": ">=18"

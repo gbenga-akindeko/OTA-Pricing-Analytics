@@ -126,7 +126,7 @@ function parseDate(str, tz, pattern) {
   return new Date(guess - tzOffsetMinutes(tz, new Date(guess)) * 60000);
 }
 
-export function createRuntime({ effectiveUser = 'cfo@finchglow.com', timeZone = 'Africa/Lagos', now } = {}) {
+export function createRuntime({ effectiveUser = 'cfo@finchglow.com', timeZone = 'Africa/Lagos', now, source } = {}) {
   let offset = 0;
   const clock = { now: () => (now ? now.getTime() : Date.now()) + offset };
   const ss = new MockSpreadsheet();
@@ -185,9 +185,13 @@ export function createRuntime({ effectiveUser = 'cfo@finchglow.com', timeZone = 
   };
   vm.createContext(context);
 
-  const files = fs.readdirSync(SCRIPT_DIR).filter((f) => f.endsWith('.js')).sort();
-  for (const f of files) {
-    vm.runInContext(fs.readFileSync(path.join(SCRIPT_DIR, f), 'utf8'), context, { filename: f });
+  if (source) {
+    vm.runInContext(source, context, { filename: 'Code.gs' });
+  } else {
+    const files = fs.readdirSync(SCRIPT_DIR).filter((f) => f.endsWith('.js')).sort();
+    for (const f of files) {
+      vm.runInContext(fs.readFileSync(path.join(SCRIPT_DIR, f), 'utf8'), context, { filename: f });
+    }
   }
 
   return {

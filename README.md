@@ -48,27 +48,54 @@ Setup also adds the group companies from the onboarding guide: the 6 subsidiarie
 
 If the sheet has no Rate Log yet, setup fills it with the four dated rows from *Exchange Rate Log - 2026.xlsx*. If you already have a Rate Log tab with the same headers, it is used as it is. Rows without a date (like C/F RATE) are skipped.
 
-## Set it up (about 15 minutes)
+## Set it up (about 10 minutes)
 
-Use a Google account that belongs to Finance, such as a shared finance mailbox, because emails go out from the account that deploys the portal.
+The portal lives in this Apps Script project: <https://script.google.com/home/projects/1Zanme9AFOGdbMCi7STTHqs9DqqTWbm67I3GjSadMoEAQhmAz3Ty6tuf3/edit>
 
-1. Open the database sheet: <https://docs.google.com/spreadsheets/d/1xu7O0dDZmUKZ6Kd7HcswG-QQw4ybACEJOixoGGPcw7w/edit>
-2. Go to **Extensions > Apps Script**.
-3. In the editor, open **Project Settings** (gear icon) and tick **Show "appsscript.json" manifest file in editor**.
-4. Copy each file from the `apps-script` folder of this repo into the editor with the same name:
-   - Script files: `Code`, `Config`, `Db`, `Auth`, `Rates`, `Analytics`, `Email`, `Admin`, `Setup` (paste the `.js` content into a script file of that name)
-   - HTML files: `Index`, `Styles`, `Client`, `Logo`
-   - Replace the contents of `appsscript.json` with the one in this repo.
-5. Choose the `setup` function in the toolbar and click **Run**. Approve the permissions when Google asks. You are now the first administrator.
-6. Click **Deploy > New deployment**, choose **Web app**, and set:
-   - Execute as: **Me**
-   - Who has access: **Anyone with Google account**, or **Anyone within [your domain]** if all finance staff use Finchglow Google Workspace accounts.
-7. Copy the web app link. That is the portal. Share it with your team.
-8. Sign in, then go to **Subsidiaries** and fill in the head of finance email for each company, and **Users & access** to add the Financial Controller and anyone else who needs to sign in.
+It reads and writes the database sheet ("DATABASE SHEET FOR EXCHANGE RATE WEB PORTAL", ID `1xu7O0dDZmUKZ6Kd7HcswG-QQw4ybACEJOixoGGPcw7w`) whether or not the project is attached to it. To point it at another sheet, add a script property called `SPREADSHEET_ID` in Project Settings.
 
-When you change the code later, use **Deploy > Manage deployments > Edit > New version** so the link stays the same.
+Emails go out from the account that deploys the portal, so deploy from a Finance account (ideally a shared finance mailbox) that can edit the database sheet.
 
-**Prefer the command line?** Install [clasp](https://github.com/google/clasp), run `clasp login`, then `clasp clone <scriptId> --rootDir apps-script` once (the script ID is in Project Settings). After that, `npm run push` uploads the code.
+### Step 1. Put the code in the project
+
+**Option A: paste 3 files (no installs).** The `dist` folder holds the whole portal in three files.
+
+1. Open the project link above. In **Project Settings** (gear icon), tick **Show "appsscript.json" manifest file in editor**.
+2. Back in the editor, open `appsscript.json` and replace everything in it with [`dist/appsscript.json`](dist/appsscript.json).
+3. Open `Code.gs` and replace everything in it with [`dist/Code.gs`](dist/Code.gs).
+4. Click **+ > HTML**, name it `Index` (no extension), and replace its contents with [`dist/Index.html`](dist/Index.html).
+5. Make sure those are the only three files. Delete anything else, or Apps Script will complain that things are declared twice.
+6. Press **Ctrl + S** to save.
+
+**Option B: push with clasp (for developers).** This repo already has `.clasp.json` pointing at the project.
+
+```bash
+npm install -g @google/clasp
+clasp login                 # opens Google sign in in your browser
+npm run push                # uploads everything in apps-script/
+```
+
+The first time, turn on the Apps Script API at <https://script.google.com/home/usersettings>, or the push is refused.
+
+### Step 2. Run setup once
+
+In the editor, pick `setup` in the function list at the top and click **Run**. Google asks you to approve the portal's permissions (edit the database sheet, send email as you, show a menu in the sheet). Approve them. Setup creates the tabs, loads the rate categories, the 8 group companies and the book rates, and makes you the first administrator.
+
+### Step 3. Deploy
+
+1. Click **Deploy > New deployment**. Next to "Select type", click the gear and choose **Web app**.
+2. Description: `Finance Portal`. Execute as: **Me**. Who has access: **Anyone with Google account** (or **Anyone within finchglow.com** if every finance user signs in with a Finchglow Google Workspace account).
+3. Click **Deploy** and copy the **Web app URL**. That is the portal link to share.
+
+With clasp you can do steps 1 to 3 of this section with `npm run deploy` instead, after running setup once in the editor.
+
+### Step 4. First sign in
+
+Open the portal link, enter your email and type the code you receive. Then go to **Subsidiaries** and add each head of finance email, and to **Users & access** to add the Financial Controller and anyone else who should sign in.
+
+### Updating later
+
+After changing the code, paste the new `dist` files (run `npm run bundle` first if you edited `apps-script/`) or run `npm run push`. Then use **Deploy > Manage deployments**, click the pencil on the existing deployment, set Version to **New version** and click **Deploy**. The portal link stays the same.
 
 ### The Finchglow logo
 
@@ -89,7 +116,7 @@ You need Node.js 18 or newer.
 
 ```bash
 npm install
-npm test        # 22 tests covering sign in, roles, publishing, emails, voids, analytics and the audit log
+npm test        # 25 tests covering sign in, roles, publishing, emails, voids, analytics, the audit log and the bundle
 npm run dev     # preview at http://localhost:8080 with demo data
 ```
 
@@ -109,7 +136,8 @@ apps-script/      Everything that goes into Apps Script
   Config.js       Tab layout, roles, default settings and categories
   Db.js           Reading and writing the sheet
   Index.html, Styles.html, Client.html, Logo.html   The portal itself
-dev/              Local preview server, Apps Script simulator and demo data
+dist/             The same portal as 3 paste-ready files (built by npm run bundle)
+dev/              Local preview server, Apps Script simulator, bundler and demo data
 test/             Automated tests
 assets/           Put the logo here before running npm run embed-logo
 ```
