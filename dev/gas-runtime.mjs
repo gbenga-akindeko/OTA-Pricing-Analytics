@@ -143,13 +143,22 @@ export function createRuntime({ effectiveUser = 'cfo@finchglow.com', timeZone = 
   }
   ss.makeDate = (d) => new ClockDate(d.getTime());
 
+  // Apps Script refuses a call when the manifest lacks its scope, so the simulator does too.
+  const manifest = JSON.parse(fs.readFileSync(path.join(SCRIPT_DIR, 'appsscript.json'), 'utf8'));
+  const granted = new Set(manifest.oauthScopes || []);
+  const need = (scope, what) => {
+    if (!granted.has('https://www.googleapis.com/auth/' + scope)) {
+      throw new Error(`Specified permissions are not sufficient to call ${what}. Required permissions: https://www.googleapis.com/auth/${scope}`);
+    }
+  };
+
   const context = {
     console: { log: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push('ERROR ' + a.join(' ')), warn: (...a) => logs.push(a.join(' ')) },
     Date: ClockDate,
     SpreadsheetApp: {
-      getActiveSpreadsheet: () => ss,
-      openById: () => ss,
-      getUi: () => { throw new Error('No UI in tests'); }
+      getActiveSpreadsheet: () => { need('spreadsheets', 'SpreadsheetApp.getActiveSpreadsheet'); return ss; },
+      openById: () => { need('spreadsheets', 'SpreadsheetApp.openById'); return ss; },
+      getUi: () => { need('script.container.ui', 'SpreadsheetApp.getUi'); throw new Error('No UI in tests'); }
     },
     PropertiesService: {
       getScriptProperties: () => ({ getProperty: (k) => props.get(k) ?? null, setProperty: (k, v) => { props.set(k, String(v)); } })
@@ -158,6 +167,7 @@ export function createRuntime({ effectiveUser = 'cfo@finchglow.com', timeZone = 
     LockService: { getScriptLock: () => ({ tryLock: () => true, waitLock: () => {}, releaseLock: () => {} }) },
     MailApp: {
       sendEmail(opts) {
+        need('script.send_mail', 'MailApp.sendEmail');
         if (typeof opts !== 'object') throw new Error('Use the object form of sendEmail');
         const all = [opts.to, opts.cc].filter(Boolean).join(',').split(',');
         if (all.some((a) => mail.failFor.has(a.trim()))) throw new Error('Invalid email: ' + opts.to);
@@ -178,7 +188,7 @@ export function createRuntime({ effectiveUser = 'cfo@finchglow.com', timeZone = 
     },
     Session: {
       getScriptTimeZone: () => timeZone,
-      getEffectiveUser: () => ({ getEmail: () => effectiveUser })
+      getEffectiveUser: () => { need('userinfo.email', 'Session.getEffectiveUser'); return { getEmail: () => effectiveUser }; }
     },
     ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/DEV/exec' }) },
     HtmlService: {}
