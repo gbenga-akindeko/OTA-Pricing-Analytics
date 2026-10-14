@@ -76,7 +76,9 @@ function publicConfig_() {
   return {
     companyName: s.COMPANY_NAME,
     portalName: s.PORTAL_NAME,
-    logoUrl: /^https:\/\//i.test(s.LOGO_URL || '') ? logoUrl_(s.LOGO_URL) : ''
+    logoUrl: /^https:\/\//i.test(s.LOGO_URL || '') ? logoUrl_(s.LOGO_URL) : '',
+    // The default logo is also built into Logo.html, so the portal can show it without fetching from Drive.
+    logoIsDefault: !s.LOGO_URL || logoUrl_(s.LOGO_URL) === DEFAULT_SETTINGS.filter(function (d) { return d[0] === 'LOGO_URL'; })[0][1]
   };
 }
 

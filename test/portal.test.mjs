@@ -69,9 +69,12 @@ test('preloaded companies without a head of finance email are skipped until one 
 
 test('the Drive share link for the logo becomes a direct image link', () => {
   const { rt, admin } = fresh();
-  assert.equal(ok(rt.call(null, 'config')).logoUrl, 'https://lh3.googleusercontent.com/d/15fH9N_jBGV4J219XrEMcwEKCjFYpdlzy');
+  const cfg = ok(rt.call(null, 'config'));
+  assert.equal(cfg.logoUrl, 'https://lh3.googleusercontent.com/d/15fH9N_jBGV4J219XrEMcwEKCjFYpdlzy');
+  assert.equal(cfg.logoIsDefault, true);
   ok(rt.call(admin, 'saveSettings', { values: { LOGO_URL: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?usp=sharing' } }));
   assert.equal(ok(rt.call(null, 'config')).logoUrl, 'https://lh3.googleusercontent.com/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
+  assert.equal(ok(rt.call(null, 'config')).logoIsDefault, false);
 });
 
 test('sign in: unknown emails get the same reply and no email', () => {

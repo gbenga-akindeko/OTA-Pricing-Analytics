@@ -70,11 +70,12 @@ When you change the code later, use **Deploy > Manage deployments > Edit > New v
 
 ### The Finchglow logo
 
-The portal and the emails load the Holdings logo from Google Drive (file `15fH9N_jBGV4J219XrEMcwEKCjFYpdlzy`). For this to work the file must be shared as **Anyone with the link can view**, because email apps and staff outside your Google account fetch it without signing in.
+The Holdings logo is built into the portal (`apps-script/Logo.html`, made from `assets/finchglow-logo.png`), so it always shows, with nothing to host.
 
-- To use a different logo, paste its Drive share link (or any https image link) into **Settings > Logo link**. Drive links are converted to a direct image link automatically.
-- If the logo cannot load, the portal shows a "Finchglow HOLDINGS" text mark in the brand colours instead, so the page never shows a broken image.
-- To build the logo into the portal itself instead, save it as `assets/finchglow-logo.png`, run `npm run embed-logo` and copy the new `apps-script/Logo.html` into the editor. Emails still use the Settings link.
+Emails cannot carry a built-in image, so they load the logo from Google Drive (file `15fH9N_jBGV4J219XrEMcwEKCjFYpdlzy`). Keep that file shared as **Anyone with the link can view**, or the logo will be missing from emails.
+
+- To change the logo, replace `assets/finchglow-logo.png`, run `npm run embed-logo`, copy the new `Logo.html` into the editor, and paste the new image's Drive share link into **Settings > Logo link** for the emails. Drive links are converted to a direct image link automatically.
+- If an image cannot load, the portal falls back to the built-in logo, then to a "Finchglow HOLDINGS" text mark, so it never shows a broken image.
 
 ### Email limits
 

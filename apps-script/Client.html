@@ -151,13 +151,20 @@
 
   /* ---------- branding ---------- */
   function logoHtml() {
-    var src = (S.config && S.config.logoUrl) || window.EMBEDDED_LOGO;
+    var c = S.config || {};
+    var src = (c.logoIsDefault !== false && window.EMBEDDED_LOGO) || c.logoUrl || window.EMBEDDED_LOGO;
     if (src) return '<span class="logo"><img src="' + esc(src) + '" alt="Finchglow Holdings" onerror="window.fgLogoFailed(this)"></span>';
     return WORDMARK;
   }
   var WORDMARK = '<span class="logo"><span class="wordmark" role="img" aria-label="Finchglow Holdings"><span class="w-top"><span class="c1">Finch</span><span class="c2">g</span><span class="c3">l</span><span class="c4">o</span><span class="c5">w</span></span><span class="w-bot">HOLDINGS</span></span></span>';
   // If the logo link cannot be reached (for example the Drive file is not shared publicly), show the text mark instead.
   window.fgLogoFailed = function (img) {
+    // Try the built-in logo before giving up on images altogether.
+    if (window.EMBEDDED_LOGO && img.getAttribute('src') !== window.EMBEDDED_LOGO) {
+      if (S.config) S.config.logoUrl = '';
+      img.src = window.EMBEDDED_LOGO;
+      return;
+    }
     if (S.config) S.config.logoUrl = '';
     window.EMBEDDED_LOGO = '';
     var holder = img.closest('.logo');
