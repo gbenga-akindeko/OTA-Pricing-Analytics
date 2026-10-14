@@ -152,9 +152,17 @@
   /* ---------- branding ---------- */
   function logoHtml() {
     var src = (S.config && S.config.logoUrl) || window.EMBEDDED_LOGO;
-    if (src) return '<span class="logo"><img src="' + esc(src) + '" alt="Finchglow Holdings"></span>';
-    return '<span class="logo"><span class="wordmark" role="img" aria-label="Finchglow Holdings"><span class="w-top"><span class="c1">Finch</span><span class="c2">g</span><span class="c3">l</span><span class="c4">o</span><span class="c5">w</span></span><span class="w-bot">HOLDINGS</span></span></span>';
+    if (src) return '<span class="logo"><img src="' + esc(src) + '" alt="Finchglow Holdings" onerror="window.fgLogoFailed(this)"></span>';
+    return WORDMARK;
   }
+  var WORDMARK = '<span class="logo"><span class="wordmark" role="img" aria-label="Finchglow Holdings"><span class="w-top"><span class="c1">Finch</span><span class="c2">g</span><span class="c3">l</span><span class="c4">o</span><span class="c5">w</span></span><span class="w-bot">HOLDINGS</span></span></span>';
+  // If the logo link cannot be reached (for example the Drive file is not shared publicly), show the text mark instead.
+  window.fgLogoFailed = function (img) {
+    if (S.config) S.config.logoUrl = '';
+    window.EMBEDDED_LOGO = '';
+    var holder = img.closest('.logo');
+    if (holder) holder.outerHTML = WORDMARK;
+  };
 
   var ICON = {
     home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
@@ -841,24 +849,26 @@
     return api('subsidiaries').then(function (d) {
       if (!stillOn('subsidiaries')) return;
       el.innerHTML = '<div class="card"><div class="card-h"><h3>Subsidiaries and heads of finance</h3><button class="btn primary sm" id="s-add">' + icon('plus') + 'Add subsidiary</button></div>' +
-        '<div class="card-b small muted" style="padding-bottom:0">Every active subsidiary gets an email each time an ROE is published. To let a head of finance also sign in to the portal, add them under Users &amp; access.</div>' +
-        (d.subsidiaries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Code</th><th>Subsidiary</th><th>Head of finance</th><th>Email</th><th>CC</th><th>Status</th><th></th></tr></thead><tbody>' +
+        '<div class="card-b small muted" style="padding-bottom:0">Finchglow Holdings has 6 subsidiaries and 2 affiliates. Every active company with a head of finance email gets the ROE each time it is published. To let a head of finance also sign in to the portal, add them under Users &amp; access.</div>' +
+        (d.subsidiaries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Code</th><th>Company</th><th>Type</th><th>Head of finance</th><th>Email</th><th>CC</th><th>Status</th><th></th></tr></thead><tbody>' +
           d.subsidiaries.map(function (s, i) {
-            return '<tr><td><b>' + esc(s.code) + '</b></td><td>' + esc(s.name) + '</td><td>' + esc(s.headName) + '</td><td>' + esc(s.headEmail) + '</td><td class="small">' + esc(s.cc) + '</td>' +
-              '<td>' + (s.active ? '<span class="badge ok">Receives ROE</span>' : '<span class="badge">Paused</span>') + '</td>' +
+            var status = !s.active ? '<span class="badge">Paused</span>' : s.headEmail ? '<span class="badge ok">Receives ROE</span>' : '<span class="badge warn">Add email</span>';
+            return '<tr><td><b>' + esc(s.code) + '</b></td><td>' + esc(s.name) + '</td><td>' + esc(s.type) + '</td><td>' + esc(s.headName) + '</td><td>' + esc(s.headEmail) + '</td><td class="small">' + esc(s.cc) + '</td>' +
+              '<td>' + status + '</td>' +
               '<td style="white-space:nowrap"><button class="btn sm" data-edit="' + i + '">Edit</button> <button class="btn sm" data-test="' + i + '">Test email</button></td></tr>';
           }).join('') + '</tbody></table></div>' : '<div class="empty">No subsidiaries yet. Add one to start emailing ROE updates.</div>') + '</div>';
 
       function edit(s) {
         modal({ title: s ? 'Edit ' + s.name : 'Add subsidiary',
           body: '<div class="grid g2"><label class="field"><span>Code</span><input class="input" name="code" value="' + esc(s ? s.code : '') + '"' + (s ? ' readonly' : '') + ' placeholder="e.g. FGT" required></label>' +
-            '<label class="field"><span>Subsidiary name</span><input class="input" name="name" value="' + esc(s ? s.name : '') + '" required></label></div>' +
+            '<label class="field"><span>Company name</span><input class="input" name="name" value="' + esc(s ? s.name : '') + '" required></label></div>' +
+            '<label class="field"><span>Type</span><select class="input" name="type">' + d.types.map(function (t) { return '<option' + ((s ? s.type : 'Subsidiary') === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></label>' +
             '<div class="grid g2"><label class="field"><span>Head of finance</span><input class="input" name="headName" value="' + esc(s ? s.headName : '') + '"></label>' +
             '<label class="field"><span>Head of finance email</span><input class="input" type="email" name="headEmail" value="' + esc(s ? s.headEmail : '') + '" required></label></div>' +
             '<label class="field"><span>CC emails (comma separated)</span><input class="input" name="cc" value="' + esc(s ? s.cc : '') + '"></label>' +
             '<label class="check"><input type="checkbox" name="active"' + (!s || s.active ? ' checked' : '') + '> Send ROE emails to this subsidiary</label>',
           onOk: function (f) {
-            return api('saveSubsidiary', { code: f.code.value, name: f.name.value, headName: f.headName.value, headEmail: f.headEmail.value, cc: f.cc.value, active: f.active.checked })
+            return api('saveSubsidiary', { code: f.code.value, name: f.name.value, type: f.type.value, headName: f.headName.value, headEmail: f.headEmail.value, cc: f.cc.value, active: f.active.checked })
               .then(function () { toast('Subsidiary saved.'); go('subsidiaries'); });
           }
         });
@@ -867,6 +877,7 @@
       el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { edit(d.subsidiaries[Number(b.getAttribute('data-edit'))]); }; });
       el.querySelectorAll('[data-test]').forEach(function (b) { b.onclick = function () {
         var s = d.subsidiaries[Number(b.getAttribute('data-test'))];
+        if (!s.headEmail) return toast('Add a head of finance email first.', true);
         b.disabled = true;
         api('testEmail', { code: s.code }).then(function (r) { toast('Test email sent to ' + r.to + '.'); }).catch(fail).then(function () { b.disabled = false; });
       }; });

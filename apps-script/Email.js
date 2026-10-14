@@ -125,7 +125,7 @@ function brandHeader_(settings) {
       return '<td width="' + c[1] + '%" style="height:4px;line-height:4px;font-size:0;background:' + c[0] + '">&nbsp;</td>';
     }).join('') + '</tr></table>';
   var logo = /^https:\/\//i.test(settings.LOGO_URL || '')
-    ? '<img src="' + esc_(settings.LOGO_URL) + '" alt="' + esc_(settings.COMPANY_NAME || 'Finchglow Holdings') + '" height="40" style="display:block;height:40px;width:auto;border:0">'
+    ? '<img src="' + esc_(logoUrl_(settings.LOGO_URL)) + '" alt="' + esc_(settings.COMPANY_NAME || 'Finchglow Holdings') + '" height="40" style="display:block;height:40px;width:auto;border:0">'
     : '<span style="font-size:13px;font-weight:700;color:#0d6a94;text-transform:uppercase;letter-spacing:.08em">' + esc_(settings.COMPANY_NAME || 'Finance') + '</span>';
   return stripe + '<div style="padding:16px 0 12px">' + logo + '</div>';
 }

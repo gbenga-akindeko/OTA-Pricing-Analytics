@@ -1,10 +1,10 @@
-// Demo data for local preview. Subsidiaries and people are placeholders (example.com).
+// Demo data for local preview. Company names are real; people and emails are placeholders (example.com).
 import { signIn } from './gas-runtime.mjs';
 
 export const DEMO_USERS = {
   admin: 'cfo@finchglow.com',
   setter: 'fc@example.com',
-  viewer: 'hof.travel@example.com'
+  viewer: 'hof.fgt@example.com'
 };
 
 function ok(res) {
@@ -17,13 +17,13 @@ export function seedDemo(rt) {
   const admin = signIn(rt, DEMO_USERS.admin);
   ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.admin, name: 'Chief Financial Officer', role: 'ADMIN', subsidiary: 'Holdings' }));
   ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.setter, name: 'Financial Controller', role: 'RATE_SETTER', subsidiary: 'Holdings' }));
-  ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.viewer, name: 'Head of Finance (Travel)', role: 'VIEWER', subsidiary: 'Demo Travel Ltd' }));
+  ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.viewer, name: 'Head of Finance (FGT)', role: 'VIEWER', subsidiary: 'Finchglow Travels' }));
 
-  [
-    ['TRV', 'Demo Travel Ltd', 'Head of Finance (Travel)', 'hof.travel@example.com', 'accounts.travel@example.com'],
-    ['CORP', 'Demo Corporate Travel Ltd', 'Head of Finance (Corporate)', 'hof.corporate@example.com', ''],
-    ['TOUR', 'Demo Tours & Holidays Ltd', 'Head of Finance (Tours)', 'hof.tours@example.com', '']
-  ].forEach(([code, name, headName, headEmail, cc]) => ok(rt.call(admin, 'saveSubsidiary', { code, name, headName, headEmail, cc })));
+  // Placeholder head of finance addresses for the six subsidiaries that setup adds.
+  [['FGT', 'Finchglow Travels'], ['FCM', 'FCM Travel Solutions'], ['HOL', 'Finchglow Holidays'], ['TVD', 'Travelden'], ['LAA', 'Lagos Aviation Academy'], ['FGB', 'Finchglobal']]
+    .forEach(([code, name]) => ok(rt.call(admin, 'saveSubsidiary', {
+      code, name, type: 'Subsidiary', headName: 'Head of Finance (' + code + ')', headEmail: 'hof.' + code.toLowerCase() + '@example.com'
+    })));
 
   // About three months of movement leading into the two real broadcasts from October 2026.
   let seed = 7;

@@ -76,7 +76,7 @@ function publicConfig_() {
   return {
     companyName: s.COMPANY_NAME,
     portalName: s.PORTAL_NAME,
-    logoUrl: /^https:\/\//i.test(s.LOGO_URL || '') ? s.LOGO_URL : ''
+    logoUrl: /^https:\/\//i.test(s.LOGO_URL || '') ? logoUrl_(s.LOGO_URL) : ''
   };
 }
 

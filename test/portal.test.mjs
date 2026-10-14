@@ -42,12 +42,36 @@ test('setup creates every tab, default categories, seeded book rates and the fir
   }
   assert.equal(rt.sheet('Rate Categories').toObjects().length, 7);
   assert.equal(rt.sheet('Rate Log').toObjects().length, 4);
+  const subs = rt.sheet('Subsidiaries').toObjects();
+  assert.equal(subs.filter((r) => r.Type === 'Subsidiary').length, 6);
+  assert.equal(subs.filter((r) => r.Type === 'Affiliate').length, 2);
+  assert.ok(subs.some((r) => r['Subsidiary Name'] === 'Travelden'));
   const users = rt.sheet('Users').toObjects();
   assert.equal(users[0].Email, ADMIN);
   assert.equal(users[0].Role, 'ADMIN');
   rt.context.setup(); // running again must not duplicate anything
   assert.equal(rt.sheet('Rate Categories').toObjects().length, 7);
   assert.equal(rt.sheet('Users').toObjects().length, 1);
+  assert.equal(rt.sheet('Subsidiaries').toObjects().length, 8);
+});
+
+test('preloaded companies without a head of finance email are skipped until one is added', () => {
+  const rt = createRuntime({ effectiveUser: ADMIN });
+  rt.context.setup();
+  const admin = signIn(rt, ADMIN);
+  const res = ok(rt.call(admin, 'publish', { rates: OCT9, sendEmail: true }));
+  assert.equal(res.email.status, 'NO RECIPIENTS');
+  ok(rt.call(admin, 'saveSubsidiary', { code: 'TVD', name: 'Travelden', type: 'Subsidiary', headName: 'TVD HoF', headEmail: 'hof@travelden.example' }));
+  const again = ok(rt.call(admin, 'publish', { rates: OCT12, sendEmail: true }));
+  assert.equal(again.email.status, 'SENT 1/1');
+  assert.equal(rt.sheet('Subsidiaries').toObjects().filter((r) => r.Code === 'TVD').length, 1);
+});
+
+test('the Drive share link for the logo becomes a direct image link', () => {
+  const { rt, admin } = fresh();
+  assert.equal(ok(rt.call(null, 'config')).logoUrl, 'https://lh3.googleusercontent.com/d/15fH9N_jBGV4J219XrEMcwEKCjFYpdlzy');
+  ok(rt.call(admin, 'saveSettings', { values: { LOGO_URL: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view?usp=sharing' } }));
+  assert.equal(ok(rt.call(null, 'config')).logoUrl, 'https://lh3.googleusercontent.com/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345');
 });
 
 test('sign in: unknown emails get the same reply and no email', () => {

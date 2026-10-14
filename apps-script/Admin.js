@@ -66,12 +66,14 @@ function listSubsidiaries_() {
       return {
         code: String(r['Code']),
         name: String(r['Subsidiary Name'] || ''),
+        type: String(r['Type'] || 'Subsidiary'),
         headName: String(r['Head of Finance'] || ''),
         headEmail: normEmail_(r['Head of Finance Email']),
         cc: String(r['CC Emails'] || ''),
         active: toBool_(r['Active'])
       };
-    })
+    }),
+    types: SUBSIDIARY_TYPES
   };
 }
 
@@ -90,6 +92,7 @@ function saveSubsidiary_(user, payload) {
   var fields = {
     'Code': code,
     'Subsidiary Name': cellText_(name),
+    'Type': SUBSIDIARY_TYPES.indexOf(payload.type) === -1 ? 'Subsidiary' : payload.type,
     'Head of Finance': cellText_(payload.headName || ''),
     'Head of Finance Email': headEmail,
     'CC Emails': cc.join(', '),
@@ -164,6 +167,7 @@ function saveSettings_(user, payload) {
   Object.keys(values).forEach(function (key) {
     if (EDITABLE_SETTINGS.indexOf(key) === -1) return;
     var value = String(values[key] === null || values[key] === undefined ? '' : values[key]).trim().slice(0, 1000);
+    if (key === 'LOGO_URL') value = logoUrl_(value);
     if (key === 'REPLY_TO' && value && !isEmail_(value)) throw new AppError('Reply-to must be a valid email.', 'VALIDATION');
     if (key === 'INTERNAL_COPY_EMAILS') {
       var bad = splitEmails_(value).filter(function (e) { return !isEmail_(e); });
@@ -185,6 +189,16 @@ function saveSettings_(user, payload) {
   });
   if (changed.length) audit_(user.email, 'UPDATE_SETTINGS', { keys: changed });
   return { changed: changed };
+}
+
+/**
+ * Turns a Google Drive share link (drive.google.com/file/d/ID/view, open?id=ID, uc?id=ID)
+ * into a direct image link that works in the portal and in emails. Other links pass through.
+ */
+function logoUrl_(value) {
+  var s = String(value || '').trim();
+  var m = /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#]*&)?id=)([A-Za-z0-9_-]{20,})/.exec(s);
+  return m ? 'https://lh3.googleusercontent.com/d/' + m[1] : s;
 }
 
 /** Newest first, filtered by category, user text and date range. Capped to keep responses small. */

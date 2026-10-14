@@ -34,13 +34,15 @@ It runs on Google Apps Script with your Google Sheet as the database, so there i
 | --- | --- |
 | Settings | Company name, logo link, broadcast note, email options |
 | Users | Who can sign in, their role and whether they are active |
-| Subsidiaries | Each subsidiary, its head of finance email and CC list |
+| Subsidiaries | Each group company, its type, head of finance email and CC list |
 | Rate Categories | The lines on each broadcast (USD Agent / Direct, and so on) and their order |
 | ROE Publications | One row per broadcast |
 | ROE Log | One row per rate line, easy to pivot or chart in Sheets |
 | Rate Log | Book rates (same columns as your Exchange Rate Log workbook) |
 | Email Log | Every email sent and whether it went through |
 | Audit Log | Every sign in, change and email, with a category column |
+
+Setup also adds the group companies from the onboarding guide: the 6 subsidiaries (Finchglow Travels, FCM Travel Solutions, Finchglow Holidays, Travelden, Lagos Aviation Academy, Finchglobal) and the 2 affiliates (Finchair, Prysm Investment). They have no emails yet. A company starts receiving ROE emails as soon as its head of finance email is filled in. The affiliates start paused; switch them on if they should get the ROE too.
 
 If the sheet has no Rate Log yet, setup fills it with the four dated rows from *Exchange Rate Log - 2026.xlsx*. If you already have a Rate Log tab with the same headers, it is used as it is. Rows without a date (like C/F RATE) are skipped.
 
@@ -60,18 +62,19 @@ Use a Google account that belongs to Finance, such as a shared finance mailbox, 
    - Execute as: **Me**
    - Who has access: **Anyone with Google account**, or **Anyone within [your domain]** if all finance staff use Finchglow Google Workspace accounts.
 7. Copy the web app link. That is the portal. Share it with your team.
-8. Sign in, then go to **Subsidiaries** to add each subsidiary and its head of finance, and **Users & access** to add the Financial Controller and anyone else who needs to sign in.
+8. Sign in, then go to **Subsidiaries** and fill in the head of finance email for each company, and **Users & access** to add the Financial Controller and anyone else who needs to sign in.
 
 When you change the code later, use **Deploy > Manage deployments > Edit > New version** so the link stays the same.
 
 **Prefer the command line?** Install [clasp](https://github.com/google/clasp), run `clasp login`, then `clasp clone <scriptId> --rootDir apps-script` once (the script ID is in Project Settings). After that, `npm run push` uploads the code.
 
-### Adding the Finchglow logo
+### The Finchglow logo
 
-The portal shows a "Finchglow HOLDINGS" text mark in the brand colours until you add the real logo. Use either option:
+The portal and the emails load the Holdings logo from Google Drive (file `15fH9N_jBGV4J219XrEMcwEKCjFYpdlzy`). For this to work the file must be shared as **Anyone with the link can view**, because email apps and staff outside your Google account fetch it without signing in.
 
-- **Embed it (recommended for the portal).** Save the logo as `assets/finchglow-logo.png`, run `npm run embed-logo`, then copy the new `apps-script/Logo.html` into the editor (or `npm run push`).
-- **Link it (needed for the logo in emails).** Put the logo somewhere public on https, such as the company website, and paste the link into **Settings > Logo link**. Email apps do not show embedded images, so emails only show the logo when this link is set.
+- To use a different logo, paste its Drive share link (or any https image link) into **Settings > Logo link**. Drive links are converted to a direct image link automatically.
+- If the logo cannot load, the portal shows a "Finchglow HOLDINGS" text mark in the brand colours instead, so the page never shows a broken image.
+- To build the logo into the portal itself instead, save it as `assets/finchglow-logo.png`, run `npm run embed-logo` and copy the new `apps-script/Logo.html` into the editor. Emails still use the Settings link.
 
 ### Email limits
 
@@ -83,7 +86,7 @@ You need Node.js 18 or newer.
 
 ```bash
 npm install
-npm test        # 20 tests covering sign in, roles, publishing, emails, voids, analytics and the audit log
+npm test        # 22 tests covering sign in, roles, publishing, emails, voids, analytics and the audit log
 npm run dev     # preview at http://localhost:8080 with demo data
 ```
 

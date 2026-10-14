@@ -24,7 +24,7 @@ var SHEETS = {
   },
   SUBSIDIARIES: {
     name: 'Subsidiaries',
-    headers: ['Code', 'Subsidiary Name', 'Head of Finance', 'Head of Finance Email', 'CC Emails', 'Active', 'Updated At', 'Updated By']
+    headers: ['Code', 'Subsidiary Name', 'Type', 'Head of Finance', 'Head of Finance Email', 'CC Emails', 'Active', 'Updated At', 'Updated By']
   },
   CATEGORIES: {
     name: 'Rate Categories',
@@ -49,7 +49,7 @@ var SHEETS = {
 /** Default values written to the Settings tab on first setup. */
 var DEFAULT_SETTINGS = [
   ['COMPANY_NAME', 'Finchglow Holdings', 'Shown in the portal header and in emails.'],
-  ['LOGO_URL', '', 'Public https link to the Finchglow Holdings logo (PNG or SVG). Used in the portal and in emails.'],
+  ['LOGO_URL', 'https://lh3.googleusercontent.com/d/15fH9N_jBGV4J219XrEMcwEKCjFYpdlzy', 'Link to the Finchglow Holdings logo. A Google Drive share link works if the file is shared as "Anyone with the link". Used in the portal and in emails.'],
   ['PORTAL_NAME', 'Finance One-Stop Portal', 'Name of the portal.'],
   ['VALIDITY_NOTE', 'This rate is ONLY VALID for a limited time. Pls call to ask in 15-mins if your client is yet to pay', 'Default note added to every ROE broadcast.'],
   ['EMAIL_SUBJECT_PREFIX', '[ROE]', 'Text placed at the start of every ROE email subject.'],
@@ -73,6 +73,23 @@ var DEFAULT_CATEGORIES = [
   ['EUR', 'EURO', 'Immediate payment', 60, true],
   ['EUR', 'EURO', 'Corporate - Invoice', 70, true]
 ];
+
+/**
+ * Group companies from the Finchglow Holdings onboarding guide: 6 subsidiaries and 2 affiliates.
+ * Setup adds them without emails; each starts receiving ROE emails once its head of finance email is filled in.
+ */
+var DEFAULT_SUBSIDIARIES = [
+  ['FGT', 'Finchglow Travels', 'Subsidiary', true],
+  ['FCM', 'FCM Travel Solutions', 'Subsidiary', true],
+  ['HOL', 'Finchglow Holidays', 'Subsidiary', true],
+  ['TVD', 'Travelden', 'Subsidiary', true],
+  ['LAA', 'Lagos Aviation Academy', 'Subsidiary', true],
+  ['FGB', 'Finchglobal', 'Subsidiary', true],
+  ['FAIR', 'Finchair', 'Affiliate', false],
+  ['PRYSM', 'Prysm Investment', 'Affiliate', false]
+];
+
+var SUBSIDIARY_TYPES = ['Subsidiary', 'Affiliate', 'Holding company'];
 
 /** Book rate history from "Exchange Rate Log - 2026.xlsx", used to seed a brand new Rate Log tab. */
 var SEED_BOOK_RATES = [

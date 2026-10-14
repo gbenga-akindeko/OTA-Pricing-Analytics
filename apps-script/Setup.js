@@ -22,6 +22,12 @@ function setup() {
     }));
   }
 
+  if (!readTable_(SHEETS.SUBSIDIARIES).length) {
+    appendRows_(SHEETS.SUBSIDIARIES, DEFAULT_SUBSIDIARIES.map(function (s) {
+      return { 'Code': s[0], 'Subsidiary Name': s[1], 'Type': s[2], 'Head of Finance': '', 'Head of Finance Email': '', 'CC Emails': '', 'Active': s[3], 'Updated At': new Date(), 'Updated By': 'setup' };
+    }));
+  }
+
   if (!readTable_(SHEETS.BOOK).length) {
     appendRows_(SHEETS.BOOK, SEED_BOOK_RATES.map(function (b) {
       return {
