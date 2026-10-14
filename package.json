@@ -1,0 +1,20 @@
+{
+  "name": "finchglow-finance-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Finchglow Holdings Finance One-Stop Portal: ROE publishing, fluctuation dashboards and audit trail on Google Apps Script.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "dev": "node dev/server.mjs",
+    "embed-logo": "node dev/embed-logo.mjs",
+    "push": "clasp push",
+    "deploy": "clasp push && clasp deploy --description \"Finance Portal\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "chart.js": "^4.4.1"
+  }
+}

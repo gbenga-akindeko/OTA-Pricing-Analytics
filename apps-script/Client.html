@@ -1,0 +1,948 @@
+<script>
+(function () {
+  'use strict';
+
+  var S = { token: null, boot: null, config: null, view: 'dashboard', charts: [], fl: { days: 30, currency: null }, audit: { category: '', q: '', from: '', to: '', tab: 'activity' } };
+  var app = document.getElementById('app');
+
+  /* ---------- small helpers ---------- */
+  var store = {
+    get: function (k) { try { return window.sessionStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { window.sessionStorage.setItem(k, v); } catch (e) { /* storage blocked */ } },
+    del: function (k) { try { window.sessionStorage.removeItem(k); } catch (e) { /* storage blocked */ } }
+  };
+  function esc(s) {
+    return String(s === null || s === undefined ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function fmt(n) {
+    if (n === null || n === undefined || n === '' || isNaN(Number(n))) return '-';
+    var num = Number(n);
+    var fixed = Math.round(num * 100) % 100 === 0 ? num.toFixed(0) : num.toFixed(2);
+    var p = fixed.split('.');
+    p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return p.join('.');
+  }
+  function pct(n) { return n === null || n === undefined ? '-' : (n > 0 ? '+' : '') + Number(n).toFixed(2) + '%'; }
+  function delta(change, opts) {
+    opts = opts || {};
+    if (change === null || change === undefined) return '<span class="delta flat">' + (opts.none || 'New') + '</span>';
+    if (change === 0) return '<span class="delta flat">No change</span>';
+    var up = change > 0;
+    return '<span class="delta ' + (up ? 'up' : 'down') + '" title="' + (up ? 'Naira weaker' : 'Naira stronger') + '">' + (up ? '&#9650; +' : '&#9660; ') + fmt(change) + (opts.pct !== undefined && opts.pct !== null ? ' (' + pct(opts.pct) + ')' : '') + '</span>';
+  }
+  function initials(name) { return String(name || '?').split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(function (w) { return w[0].toUpperCase(); }).join(''); }
+  function rank(role) { return { VIEWER: 1, RATE_SETTER: 2, ADMIN: 3 }[role] || 0; }
+  function can(role) { return S.boot && rank(S.boot.user.role) >= rank(role); }
+  function isoDay(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function daysAgo(n) { var d = new Date(); d.setDate(d.getDate() - n); return isoDay(d); }
+  function rid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+  function nowInput(tz) {
+    try {
+      var p = {};
+      new Intl.DateTimeFormat('en-GB', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(new Date()).forEach(function (x) { p[x.type] = x.value; });
+      return p.year + '-' + p.month + '-' + p.day + 'T' + p.hour + ':' + p.minute;
+    } catch (e) {
+      var d = new Date();
+      return isoDay(d) + 'T' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+    }
+  }
+  function shortName(publishedBy) { return String(publishedBy || '').replace(/\s*<.*>$/, ''); }
+
+  function api(action, payload) {
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (r) {
+          if (r && r.ok) return resolve(r.data);
+          var err = r || { error: 'No response from the server.' };
+          if (err.code === 'AUTH' && action !== 'verifyCode') {
+            signedOut(err.error);
+          }
+          reject(err);
+        })
+        .withFailureHandler(function (e) { reject({ error: (e && e.message) || String(e), code: 'NETWORK' }); })
+        .api(S.token, action, payload || {});
+    });
+  }
+
+  function toast(msg, isError) {
+    var host = document.getElementById('toasts');
+    var el = document.createElement('div');
+    el.className = 'toast' + (isError ? ' error' : '');
+    el.textContent = msg;
+    host.appendChild(el);
+    setTimeout(function () { el.remove(); }, isError ? 7000 : 4000);
+  }
+  function fail(e) { toast((e && e.error) || 'Something went wrong.', true); }
+
+  function modal(opts) {
+    var bg = document.createElement('div');
+    bg.className = 'modal-bg';
+    bg.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-label="' + esc(opts.title) + '">' +
+      '<div class="card-h"><h3>' + esc(opts.title) + '</h3><button class="btn sm" data-x aria-label="Close">Close</button></div>' +
+      '<form class="card-b" novalidate>' + opts.body + '<div class="alert error hidden" data-err></div></form>' +
+      '<div class="modal-foot"><button class="btn" data-x>Cancel</button><button class="btn ' + (opts.danger ? 'danger' : 'primary') + '" data-ok>' + esc(opts.ok || 'Save') + '</button></div></div>';
+    document.body.appendChild(bg);
+    var form = bg.querySelector('form');
+    var okBtn = bg.querySelector('[data-ok]');
+    var errBox = bg.querySelector('[data-err]');
+    function close() { bg.remove(); }
+    bg.addEventListener('click', function (ev) { if (ev.target === bg || ev.target.hasAttribute('data-x')) close(); });
+    function submit(ev) {
+      if (ev) ev.preventDefault();
+      if (!opts.onOk) return close();
+      okBtn.disabled = true;
+      errBox.classList.add('hidden');
+      Promise.resolve(opts.onOk(form)).then(function (keepOpen) { if (!keepOpen) close(); }).catch(function (e) {
+        errBox.textContent = (e && e.error) || 'Something went wrong.';
+        errBox.classList.remove('hidden');
+      }).then(function () { okBtn.disabled = false; });
+    }
+    okBtn.addEventListener('click', submit);
+    form.addEventListener('submit', submit);
+    var first = form.querySelector('input, select, textarea');
+    if (first) first.focus(); else okBtn.focus();
+    if (opts.onOpen) opts.onOpen(form);
+    return { close: close, form: form };
+  }
+
+  function confirmBox(title, html, okLabel, danger) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var m = modal({ title: title, body: html, ok: okLabel, danger: danger, onOk: function () { done = true; resolve(true); } });
+      var observer = new MutationObserver(function () { if (!document.body.contains(m.form)) { observer.disconnect(); if (!done) resolve(false); } });
+      observer.observe(document.body, { childList: true });
+    });
+  }
+
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+      return ok;
+    }
+    var p = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text).then(function () { return true; }, fallback) : Promise.resolve(fallback());
+    p.then(function (ok) { toast(ok ? 'Copied. Paste it into WhatsApp.' : 'Copy was blocked by the browser. Select the text and copy it manually.', !ok); });
+  }
+
+  function downloadCsv(filename, rows) {
+    var csv = rows.map(function (r) {
+      return r.map(function (v) {
+        var s = String(v === null || v === undefined ? '' : v);
+        if (/^[=+\-@]/.test(s)) s = "'" + s;
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',');
+    }).join('\r\n');
+    var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
+  /* ---------- branding ---------- */
+  function logoHtml() {
+    var src = (S.config && S.config.logoUrl) || window.EMBEDDED_LOGO;
+    if (src) return '<span class="logo"><img src="' + esc(src) + '" alt="Finchglow Holdings"></span>';
+    return '<span class="logo"><span class="wordmark" role="img" aria-label="Finchglow Holdings"><span class="w-top"><span class="c1">Finch</span><span class="c2">g</span><span class="c3">l</span><span class="c4">o</span><span class="c5">w</span></span><span class="w-bot">HOLDINGS</span></span></span>';
+  }
+
+  var ICON = {
+    home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+    chart: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-7"/>',
+    send: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    book: '<path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M4 17a3 3 0 0 1 3-3h11"/>',
+    plane: '<path d="M10.5 13.5L3 11l1-2 8 1 5-6a2 2 0 0 1 3 3l-6 5 1 8-2 1-2.5-7.5"/>',
+    wallet: '<rect x="3" y="6" width="18" height="14" rx="2"/><path d="M16 13h2"/><path d="M3 10h18"/>',
+    shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    file: '<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+    log: '<path d="M4 5h16M4 10h16M4 15h10M4 20h7"/>',
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/>',
+    building: '<path d="M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M8 8h3M8 12h3M8 16h3M3 21h18"/>',
+    tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>',
+    cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+    download: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    out: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 17l5-5-5-5M15 12H3"/>'
+  };
+  function icon(name) { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICON[name] || '') + '</svg>'; }
+
+  var NAV = [
+    { group: 'Exchange rates', items: [
+      { id: 'dashboard', label: 'Dashboard', icon: 'home' },
+      { id: 'fluctuations', label: 'Rate fluctuations', icon: 'chart' },
+      { id: 'publish', label: 'Publish ROE', icon: 'send', role: 'RATE_SETTER' },
+      { id: 'history', label: 'ROE history', icon: 'clock' },
+      { id: 'book', label: 'Book rates', icon: 'book' }
+    ] },
+    { group: 'Finance', items: [
+      { id: 'bsp', label: 'BSP tracking', icon: 'plane', soon: true },
+      { id: 'receivables', label: 'Receivables', icon: 'wallet', soon: true },
+      { id: 'credit', label: 'Credit control', icon: 'shield', soon: true },
+      { id: 'invoices', label: 'Invoices', icon: 'file', soon: true }
+    ] },
+    { group: 'Administration', role: 'ADMIN', items: [
+      { id: 'audit', label: 'Audit log', icon: 'log' },
+      { id: 'users', label: 'Users & access', icon: 'users' },
+      { id: 'subsidiaries', label: 'Subsidiaries', icon: 'building' },
+      { id: 'categories', label: 'Rate categories', icon: 'tag' },
+      { id: 'settings', label: 'Settings', icon: 'cog' }
+    ] }
+  ];
+  function navItem(id) {
+    for (var g = 0; g < NAV.length; g++) for (var i = 0; i < NAV[g].items.length; i++) if (NAV[g].items[i].id === id) return { item: NAV[g].items[i], group: NAV[g] };
+    return null;
+  }
+
+  /* ---------- sign in ---------- */
+  function renderLogin(step, email, message) {
+    destroyCharts();
+    var c = S.config || {};
+    app.innerHTML = '<div class="login-wrap"><div class="login-card">' +
+      '<div class="login-body">' + logoHtml() +
+      '<h1>' + esc(c.portalName || 'Finance One-Stop Portal') + '</h1>' +
+      '<p class="sub">' + (step === 'code' ? 'Enter the 6 digit code sent to <b>' + esc(email) + '</b>.' : 'Sign in with your work email. We will email you a one-time code.') + '</p>' +
+      (message ? '<div class="alert info" style="margin-bottom:14px">' + esc(message) + '</div>' : '') +
+      '<form id="login-form" class="stack" novalidate>' +
+      (step === 'code'
+        ? '<label class="field"><span>Sign in code</span><input class="input code-input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>'
+        : '<label class="field"><span>Work email</span><input class="input" name="email" type="email" autocomplete="email" value="' + esc(email || '') + '" required></label>') +
+      '<div class="alert error hidden" id="login-err"></div>' +
+      '<button class="btn primary" style="width:100%" type="submit">' + (step === 'code' ? 'Sign in' : 'Email me a code') + '</button>' +
+      (step === 'code' ? '<div class="row"><button type="button" class="btn sm" id="back-btn">Use a different email</button><span class="spacer"></span><button type="button" class="btn sm" id="resend-btn">Send a new code</button></div>' : '') +
+      '</form></div>' +
+      '<div class="login-foot">Access is limited to approved ' + esc(c.companyName || 'Finchglow Holdings') + ' finance staff. Every sign in is recorded.</div>' +
+      '</div></div>';
+
+    var form = document.getElementById('login-form');
+    var err = document.getElementById('login-err');
+    var btn = form.querySelector('button[type=submit]');
+    form.querySelector('input').focus();
+    function showErr(e) { err.textContent = (e && e.error) || 'Something went wrong.'; err.classList.remove('hidden'); btn.disabled = false; }
+
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      err.classList.add('hidden');
+      btn.disabled = true;
+      if (step === 'code') {
+        api('verifyCode', { email: email, code: form.code.value }).then(function (r) {
+          S.token = r.token;
+          store.set('fp_token', r.token);
+          start();
+        }).catch(showErr);
+      } else {
+        var em = form.email.value.trim();
+        api('requestCode', { email: em }).then(function (r) { renderLogin('code', em, r.message); }).catch(showErr);
+      }
+    });
+    if (step === 'code') {
+      document.getElementById('back-btn').onclick = function () { renderLogin('email', email); };
+      document.getElementById('resend-btn').onclick = function () {
+        api('requestCode', { email: email }).then(function (r) { renderLogin('code', email, 'A new code is on its way if the last one was sent more than a minute ago.'); }).catch(showErr);
+      };
+    }
+  }
+
+  function signedOut(message) {
+    S.token = null;
+    S.boot = null;
+    store.del('fp_token');
+    renderLogin('email', '', message);
+  }
+
+  function start() {
+    app.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+    api('bootstrap').then(function (boot) {
+      S.boot = boot;
+      S.config = boot.config;
+      renderShell();
+      var saved = store.get('fp_view');
+      go(saved && navItem(saved) && allowed(navItem(saved)) ? saved : 'dashboard');
+    }).catch(function (e) { if (e.code !== 'AUTH') signedOut(e.error); });
+  }
+
+  function allowed(found) {
+    return (!found.group.role || can(found.group.role)) && (!found.item.role || can(found.item.role));
+  }
+
+  /* ---------- shell ---------- */
+  function renderShell() {
+    var u = S.boot.user;
+    var nav = NAV.filter(function (g) { return !g.role || can(g.role); }).map(function (g) {
+      return '<h6>' + esc(g.group) + '</h6>' + g.items.filter(function (i) { return !i.role || can(i.role); }).map(function (i) {
+        return '<button data-nav="' + i.id + '">' + icon(i.icon) + '<span>' + esc(i.label) + '</span>' + (i.soon ? '<span class="soon">SOON</span>' : '') + '</button>';
+      }).join('');
+    }).join('');
+    app.innerHTML = '<div class="shell">' +
+      '<aside class="sidebar" id="sidebar"><div class="brand">' + logoHtml() + '</div>' +
+      '<div class="portal-name">' + esc(S.config.portalName) + '</div>' +
+      '<nav class="nav" aria-label="Main">' + nav + '</nav>' +
+      '<div class="side-foot">v' + esc(S.boot.version) + ' &middot; Times in ' + esc(S.boot.timezone) + '</div></aside>' +
+      '<div class="main"><header class="topbar">' +
+      '<button class="btn sm menu-btn" id="menu-btn" aria-label="Open menu">' + icon('menu') + '</button>' +
+      '<h2 id="page-title"></h2>' +
+      '<div class="user-chip"><div class="avatar" aria-hidden="true">' + esc(initials(u.name)) + '</div><div class="user-meta"><b>' + esc(u.name) + '</b><span>' + esc(u.roleLabel) + '</span></div>' +
+      '<button class="btn sm" id="signout" title="Sign out">' + icon('out') + '<span>Sign out</span></button></div></header>' +
+      '<main class="content" id="content"></main></div></div>';
+
+    document.getElementById('signout').onclick = function () {
+      api('logout').catch(function () {}).then(function () { signedOut('You have signed out.'); });
+    };
+    document.getElementById('menu-btn').onclick = function () { document.getElementById('sidebar').classList.toggle('open'); };
+  }
+
+  document.addEventListener('click', function (ev) {
+    var n = ev.target.closest('[data-nav]');
+    if (n) { ev.preventDefault(); go(n.getAttribute('data-nav')); }
+  });
+
+  function destroyCharts() { S.charts.forEach(function (c) { try { c.destroy(); } catch (e) { /* already gone */ } }); S.charts = []; }
+
+  function go(view) {
+    var found = navItem(view);
+    if (!found || !allowed(found)) {
+      view = 'dashboard';
+      found = navItem('dashboard');
+    }
+    S.view = view;
+    store.set('fp_view', view);
+    destroyCharts();
+    document.querySelectorAll('.nav button').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-nav') === view); });
+    var sb = document.getElementById('sidebar');
+    if (sb) sb.classList.remove('open');
+    document.getElementById('page-title').textContent = found.item.label;
+    var content = document.getElementById('content');
+    content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+    var fn = found.item.soon ? function (el) { return viewSoon(el, view); } : VIEWS[view];
+    Promise.resolve(fn(content)).catch(function (e) {
+      if (S.view === view && e && e.code !== 'AUTH') content.innerHTML = '<div class="alert error">' + esc((e && e.error) || 'Could not load this page.') + '</div>';
+    });
+    window.scrollTo(0, 0);
+  }
+  function stillOn(view) { return S.view === view; }
+
+  /* ---------- rate helpers ---------- */
+  function groupRates(rates) {
+    var order = {};
+    var names = {};
+    var i = 0;
+    (S.boot.categories || []).forEach(function (g) {
+      names[g.currency] = g.displayName;
+      order[g.currency] = i++;
+      g.categories.forEach(function (c) { order[g.currency + '||' + c] = i++; });
+    });
+    var groups = {};
+    var list = [];
+    rates.forEach(function (r) {
+      if (!groups[r.currency]) { groups[r.currency] = { currency: r.currency, displayName: names[r.currency] || r.currency, lines: [] }; list.push(groups[r.currency]); }
+      groups[r.currency].lines.push(r);
+    });
+    function rk(k) { return order[k] === undefined ? 9999 : order[k]; }
+    list.sort(function (a, b) { return rk(a.currency) - rk(b.currency); });
+    list.forEach(function (g) { g.lines.sort(function (a, b) { return rk(a.currency + '||' + a.category) - rk(b.currency + '||' + b.category); }); });
+    return list;
+  }
+
+  /** Same layout as the WhatsApp broadcast. `when` is "dd/MM/yy @HH:mm". */
+  function roeText(when, rates, note) {
+    var out = ['ROE for ' + when, ''];
+    groupRates(rates).forEach(function (g) {
+      out.push(g.displayName + ' ROE:');
+      g.lines.forEach(function (l) { out.push(fmt(l.rate) + ' - (' + l.category + ')'); });
+      out.push('');
+    });
+    if (note) out.push('Note: ' + note);
+    return out.join('\n').replace(/\n+$/, '');
+  }
+  function labelToWhen(label) { return String(label || '').replace(' @ ', ' @'); }
+  function inputToWhen(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(v || '');
+    return m ? m[3] + '/' + m[2] + '/' + m[1].slice(2) + ' @' + m[4] + ':' + m[5] : '';
+  }
+
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function seriesColor(i) { return cssVar('--series-' + ((i % 3) + 1)); }
+
+  function lineChart(canvas, labels, datasets, opts) {
+    if (!window.Chart) {
+      canvas.parentNode.innerHTML = '<div class="empty">The chart library could not load. The table below has the same figures.</div>';
+      return;
+    }
+    opts = opts || {};
+    var text2 = cssVar('--text-2');
+    var grid = cssVar('--grid');
+    var chart = new window.Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: datasets.map(function (d, i) {
+          var color = seriesColor(d.colorIndex === undefined ? i : d.colorIndex);
+          return {
+            label: d.label, data: d.data, borderColor: color, backgroundColor: color,
+            borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, pointHitRadius: 12,
+            stepped: opts.stepped ? 'before' : false, tension: 0, spanGaps: false
+          };
+        })
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top', align: 'start', labels: { color: text2, usePointStyle: true, pointStyle: 'line', boxWidth: 18, padding: 14 } },
+          tooltip: { callbacks: { label: function (ctx) { return ' ' + ctx.dataset.label + ': ' + (opts.format ? opts.format(ctx.parsed.y) : fmt(ctx.parsed.y)); } } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: text2, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+          y: { grid: { color: grid }, border: { display: false }, ticks: { color: text2, callback: function (v) { return opts.format ? opts.format(v) : fmt(v); } } }
+        }
+      }
+    });
+    S.charts.push(chart);
+  }
+
+  /* ---------- views ---------- */
+  var VIEWS = {};
+
+  VIEWS.dashboard = function (el) {
+    return Promise.all([api('current'), api('fluctuations', { days: 30 })]).then(function (res) {
+      if (!stillOn('dashboard')) return;
+      var cur = res[0];
+      var fl = res[1];
+      var latest = cur.latest;
+      var flBy = {};
+      fl.groups.forEach(function (g) { flBy[g.currency] = g; });
+
+      var tiles = cur.groups.slice(0, 3).map(function (g) {
+        var head = g.lines.filter(function (l) { return l.rate !== null; })[0] || g.lines[0];
+        var f = flBy[g.currency] && flBy[g.currency].series.filter(function (s) { return s.category === head.category; })[0];
+        return '<div class="card tile accent"><div class="label">' + esc(g.displayName) + ' &middot; ' + esc(head.category) + '</div>' +
+          '<div class="value num">&#8358;' + fmt(head.rate) + '</div>' +
+          '<div class="meta">' + delta(head.change, { none: 'No earlier rate' }) + ' vs previous' +
+          (f && f.changePct !== null ? ' &middot; 30 days ' + delta(f.change, { pct: f.changePct, none: '-' }) : '') + '</div></div>';
+      }).join('');
+      tiles += '<div class="card tile accent"><div class="label">Broadcasts in the last 30 days</div><div class="value num">' + fl.publicationsInWindow + '</div>' +
+        '<div class="meta">' + (latest ? 'Last by ' + esc(shortName(latest.publishedBy)) : 'No rates published yet') + '</div></div>';
+
+      var board = cur.groups.map(function (g) {
+        return '<div class="card cur-card"><div class="card-h"><h3>' + esc(g.displayName) + ' ROE</h3><span class="cur-code">' + esc(g.currency) + '/NGN</span></div>' +
+          g.lines.map(function (l) {
+            var stale = latest && l.rate !== null && !latest.rates.some(function (r) { return r.currency === g.currency && r.category === l.category; });
+            return '<div class="rate-line' + (stale ? ' stale' : '') + '"><div class="cat">' + esc(l.category) + '</div><div class="val num">' + fmt(l.rate) + '</div>' +
+              '<div class="sub"><span>' + (l.rate === null ? 'Not published yet' : (stale ? 'Not in latest broadcast, last set ' : 'Set ') + esc(l.effectiveLabel)) + '</span>' + (l.rate === null ? '' : delta(l.change)) + '</div></div>';
+          }).join('') + '</div>';
+      }).join('');
+
+      var recent = cur.recent.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Effective</th><th>Rates</th><th>Published by</th><th>Email</th></tr></thead><tbody>' +
+        cur.recent.map(function (p) {
+          return '<tr><td class="num" style="white-space:nowrap">' + esc(p.effectiveLabel) + '</td><td>' + p.rates.map(function (r) {
+            return '<span class="badge" style="margin:0 4px 4px 0">' + esc(r.currency) + ' ' + esc(r.category) + ': <span class="num">' + fmt(r.rate) + '</span></span>';
+          }).join('') + '</td><td>' + esc(shortName(p.publishedBy)) + '</td><td>' + emailBadge(p.emailStatus) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">No broadcasts yet.</div>';
+
+      el.innerHTML =
+        '<div class="row" style="margin-bottom:16px"><div><div class="eyebrow">Rate of exchange</div>' +
+        '<div style="font-size:20px;font-weight:700">' + (latest ? 'ROE as at ' + esc(latest.effectiveLabel) : 'No ROE published yet') + '</div>' +
+        (latest ? '<div class="muted small">Published by ' + esc(shortName(latest.publishedBy)) + ' &middot; ' + emailBadge(latest.emailStatus) + '</div>' : '') + '</div>' +
+        '<span class="spacer"></span>' +
+        (latest ? '<button class="btn" id="copy-wa">' + icon('copy') + 'Copy for WhatsApp</button>' : '') +
+        (can('RATE_SETTER') ? '<button class="btn primary" data-nav="publish">' + icon('send') + 'Publish new rates</button>' : '') + '</div>' +
+        '<div class="grid g4" style="margin-bottom:16px">' + tiles + '</div>' +
+        (latest && latest.note ? '<div class="alert" style="margin-bottom:16px"><b>Note:</b> ' + esc(latest.note) + '</div>' : '') +
+        '<div class="grid g3" style="margin-bottom:16px">' + board + '</div>' +
+        '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>30 day movement, % change from the start of the period</h3><button class="btn sm" data-nav="fluctuations">' + icon('chart') + 'Full analysis</button></div>' +
+        '<div class="card-b"><div class="chart-box"><canvas id="dash-chart" aria-label="Percentage change in the headline rate for each currency over 30 days"></canvas></div>' +
+        '<p class="muted small" style="margin:10px 0 0">Each line tracks the first category of a currency (for example USD Agent / Direct). Up means the naira weakened.</p></div></div>' +
+        '<div class="card"><div class="card-h"><h3>Recent broadcasts</h3><button class="btn sm" data-nav="history">View all</button></div>' + recent + '</div>';
+
+      if (latest) {
+        document.getElementById('copy-wa').onclick = function () { copyText(roeText(labelToWhen(latest.effectiveLabel), latest.rates, latest.note)); };
+      }
+      var ds = fl.groups.map(function (g, i) {
+        var s = g.series.filter(function (x) { return x.current !== null; })[0];
+        if (!s) return null;
+        var base = s.open;
+        return { label: g.displayName + ' (' + s.category + ')', colorIndex: i, data: s.closes.map(function (c) { return c === null || !base ? null : Math.round((c / base - 1) * 10000) / 100; }) };
+      }).filter(Boolean);
+      if (ds.length) lineChart(document.getElementById('dash-chart'), fl.labels, ds, { stepped: true, format: function (v) { return (v > 0 ? '+' : '') + Number(v).toFixed(2) + '%'; } });
+      else document.getElementById('dash-chart').parentNode.innerHTML = '<div class="empty">Publish rates to start tracking movement.</div>';
+    });
+  };
+
+  function emailBadge(status) {
+    var s = String(status || '');
+    if (/^SENT/.test(s)) return '<span class="badge ok">Emailed ' + esc(s.replace('SENT ', '')) + '</span>';
+    if (/^PARTIAL/.test(s)) return '<span class="badge warn">Partly emailed ' + esc(s.replace('PARTIAL ', '')) + '</span>';
+    if (/^FAILED/.test(s)) return '<span class="badge bad">Email failed</span>';
+    if (s === 'NO RECIPIENTS') return '<span class="badge warn">No recipients set up</span>';
+    if (s === 'PENDING') return '<span class="badge">Sending</span>';
+    return '<span class="badge">Not emailed</span>';
+  }
+
+  VIEWS.fluctuations = function (el) {
+    return api('fluctuations', { days: S.fl.days }).then(function (fl) {
+      if (!stillOn('fluctuations')) return;
+      if (!S.fl.currency || !fl.groups.some(function (g) { return g.currency === S.fl.currency; })) S.fl.currency = fl.groups[0] ? fl.groups[0].currency : null;
+      var g = fl.groups.filter(function (x) { return x.currency === S.fl.currency; })[0];
+      var windows = { 7: '7 days', 30: '30 days', 90: '90 days', 180: '6 months', 365: '1 year' };
+
+      var head = g ? (g.series.filter(function (s) { return s.current !== null; })[0] || g.series[0]) : null;
+      var tiles = head ? [
+        ['Current &middot; ' + esc(head.category), '&#8358;' + fmt(head.current), head.markupOverBook !== null ? pct(head.markupOverBook) + ' over book rate (' + fmt(g.bookRate) + ')' : 'No book rate on file'],
+        ['Change over ' + windows[fl.days], delta(head.change, { pct: head.changePct, none: '-' }), 'From ' + fmt(head.open) + ' to ' + fmt(head.current)],
+        ['High / low', '<span class="num">' + fmt(head.high) + ' / ' + fmt(head.low) + '</span>', 'Range ' + (head.high !== null ? fmt(Math.round((head.high - head.low) * 100) / 100) : '-')],
+        ['Rate changes', '<span class="num">' + head.moves + '</span>', head.biggestMove ? 'Biggest move ' + (head.biggestMove.change > 0 ? '+' : '') + fmt(head.biggestMove.change) + ' on ' + esc(head.biggestMove.label) : 'No moves in this period']
+      ].map(function (t) { return '<div class="card tile accent"><div class="label">' + t[0] + '</div><div class="value">' + t[1] + '</div><div class="meta">' + t[2] + '</div></div>'; }).join('') : '';
+
+      var rows = [];
+      fl.groups.forEach(function (gg) {
+        gg.series.forEach(function (s) {
+          rows.push('<tr><td><b>' + esc(gg.displayName) + '</b></td><td>' + esc(s.category) + '</td><td class="r num">' + fmt(s.open) + '</td><td class="r num"><b>' + fmt(s.current) + '</b></td>' +
+            '<td class="r">' + delta(s.change, { none: '-' }) + '</td><td class="r num">' + pct(s.changePct) + '</td><td class="r num">' + fmt(s.high) + '</td><td class="r num">' + fmt(s.low) + '</td>' +
+            '<td class="r num">' + s.moves + '</td><td class="small">' + (s.biggestMove ? (s.biggestMove.change > 0 ? '+' : '') + fmt(s.biggestMove.change) + ' on ' + esc(s.biggestMove.label) : '-') + '</td>' +
+            '<td class="r num">' + (s.markupOverBook === null ? '-' : pct(s.markupOverBook)) + '</td></tr>');
+        });
+      });
+
+      el.innerHTML =
+        '<div class="row" style="margin-bottom:16px"><div class="chips" role="group" aria-label="Period">' + fl.windows.map(function (w) {
+          return '<button data-days="' + w + '" class="' + (w === fl.days ? 'on' : '') + '">' + windows[w] + '</button>';
+        }).join('') + '</div><span class="spacer"></span><div class="chips" role="group" aria-label="Currency">' + fl.groups.map(function (x) {
+          return '<button data-cur="' + esc(x.currency) + '" class="' + (x.currency === S.fl.currency ? 'on' : '') + '">' + esc(x.displayName) + '</button>';
+        }).join('') + '</div></div>' +
+        (g ? '<div class="grid g4" style="margin-bottom:16px">' + tiles + '</div>' +
+          '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>' + esc(g.displayName) + ' ROE by category, daily close (NGN per ' + esc(g.currency) + ')</h3></div>' +
+          '<div class="card-b"><div class="chart-box"><canvas id="fl-chart" aria-label="Daily closing ROE per category"></canvas></div>' +
+          '<p class="muted small" style="margin:10px 0 0">The daily close is the last rate broadcast on or before that day. Gaps mean no rate had been published yet.</p></div></div>' : '<div class="empty card">No rate categories are set up.</div>') +
+        '<div class="card"><div class="card-h"><h3>All currencies, ' + windows[fl.days] + '</h3><button class="btn sm" id="fl-csv">' + icon('download') + 'Export CSV</button></div>' +
+        '<div class="table-wrap"><table class="t"><thead><tr><th>Currency</th><th>Category</th><th class="r">Start</th><th class="r">Current</th><th class="r">Change</th><th class="r">Change %</th><th class="r">High</th><th class="r">Low</th><th class="r">Moves</th><th>Biggest move</th><th class="r">Over book</th></tr></thead><tbody>' +
+        rows.join('') + '</tbody></table></div>' +
+        '<div class="card-b small muted">Book rates come from the Rate Log' + (fl.book ? ' (latest ' + esc(fl.book.label) + ')' : '') + '. "Over book" is how far the current ROE sits above that rate.</div></div>';
+
+      el.querySelectorAll('[data-days]').forEach(function (b) { b.onclick = function () { S.fl.days = Number(b.getAttribute('data-days')); go('fluctuations'); }; });
+      el.querySelectorAll('[data-cur]').forEach(function (b) { b.onclick = function () { S.fl.currency = b.getAttribute('data-cur'); go('fluctuations'); }; });
+      document.getElementById('fl-csv').onclick = function () {
+        var out = [['Currency', 'Category', 'Start', 'Current', 'Change', 'Change %', 'High', 'Low', 'Moves', 'Biggest move', 'Over book %']];
+        fl.groups.forEach(function (gg) { gg.series.forEach(function (s) {
+          out.push([gg.currency, s.category, s.open, s.current, s.change, s.changePct, s.high, s.low, s.moves, s.biggestMove ? s.biggestMove.change + ' on ' + s.biggestMove.label : '', s.markupOverBook]);
+        }); });
+        downloadCsv('roe-fluctuations-' + fl.days + 'd.csv', out);
+      };
+      if (g) lineChart(document.getElementById('fl-chart'), fl.labels, g.series.map(function (s) { return { label: s.category, data: s.closes }; }), { stepped: true });
+    });
+  };
+
+  VIEWS.publish = function (el) {
+    return Promise.all([api('current'), api('recipients')]).then(function (res) {
+      if (!stillOn('publish')) return;
+      var cur = res[0];
+      var rec = res[1];
+      var requestId = rid();
+      var groups = cur.groups;
+
+      el.innerHTML = '<form id="pub-form" novalidate><div class="pub-grid"><div class="stack">' +
+        '<div class="card"><div class="card-b grid g2">' +
+        '<label class="field"><span>Effective date and time (' + esc(S.boot.timezone) + ')</span><input class="input" type="datetime-local" name="effectiveAt" value="' + nowInput(S.boot.timezone) + '" required></label>' +
+        '<div class="small muted" style="align-self:end">Boxes start with the current rates. Change what moved, and clear a box to leave that category out of this broadcast.</div></div></div>' +
+        groups.map(function (g) {
+          return '<div class="card"><div class="card-h"><h3>' + esc(g.displayName) + ' ROE</h3><span class="cur-code">' + esc(g.currency) + '/NGN</span></div>' +
+            g.lines.map(function (l) {
+              return '<div class="pub-line"><label for="r-' + esc(g.currency + l.category) + '">' + esc(l.category) + '</label>' +
+                '<input class="input num" id="r-' + esc(g.currency + l.category) + '" data-cur="' + esc(g.currency) + '" data-cat="' + esc(l.category) + '" data-prev="' + (l.rate === null ? '' : l.rate) + '" inputmode="decimal" value="' + (l.rate === null ? '' : l.rate) + '" autocomplete="off">' +
+                '<div class="was" data-was>' + (l.rate === null ? 'New' : 'Now ' + fmt(l.rate)) + '</div></div>';
+            }).join('') + '</div>';
+        }).join('') +
+        '<div class="card"><div class="card-b stack">' +
+        '<label class="field"><span>Note on the broadcast</span><textarea class="input" name="note" maxlength="500">' + esc(S.boot.validityNote) + '</textarea></label>' +
+        '<label class="check"><input type="checkbox" name="sendEmail" checked> Email the heads of finance now (' + rec.subsidiaries.length + ' subsidiar' + (rec.subsidiaries.length === 1 ? 'y' : 'ies') + (rec.internalCopy.length ? ' plus ' + rec.internalCopy.length + ' internal cop' + (rec.internalCopy.length === 1 ? 'y' : 'ies') : '') + ')</label>' +
+        (rec.subsidiaries.length ? '' : '<div class="alert">No active subsidiaries have a head of finance email yet.' + (can('ADMIN') ? ' Add them under <a href="#" data-nav="subsidiaries">Subsidiaries</a>.' : ' Ask an administrator to add them.') + '</div>') +
+        '<div class="row"><span class="spacer"></span><button class="btn primary" type="submit" id="pub-btn">' + icon('send') + 'Publish ROE</button></div>' +
+        '</div></div></div>' +
+        '<div class="stack sticky"><div class="card"><div class="card-h"><h3>Broadcast preview</h3><button class="btn sm" type="button" id="pv-copy">' + icon('copy') + 'Copy for WhatsApp</button></div>' +
+        '<div class="card-b"><pre class="preview" id="pv"></pre></div></div>' +
+        '<div class="card"><div class="card-h"><h3>Email goes to</h3></div><div class="card-b small">' +
+        (rec.subsidiaries.length ? rec.subsidiaries.map(function (s) { return '<div style="margin-bottom:6px"><b>' + esc(s.name) + '</b><br><span class="muted">' + esc(s.headName ? s.headName + ', ' : '') + esc(s.email) + '</span></div>'; }).join('') : '<span class="muted">Nobody yet.</span>') +
+        (rec.internalCopy.length ? '<div class="muted" style="margin-top:8px">Copy to: ' + esc(rec.internalCopy.join(', ')) + '</div>' : '') +
+        '</div></div></div></div></form>';
+
+      var form = document.getElementById('pub-form');
+      var inputs = [].slice.call(form.querySelectorAll('input[data-cat]'));
+      function collect() {
+        return inputs.map(function (i) { return { currency: i.getAttribute('data-cur'), category: i.getAttribute('data-cat'), rate: i.value.replace(/,/g, '').trim() }; })
+          .filter(function (r) { return r.rate !== ''; });
+      }
+      function refresh() {
+        inputs.forEach(function (i) {
+          var was = i.parentNode.querySelector('[data-was]');
+          var prev = i.getAttribute('data-prev');
+          var v = Number(i.value.replace(/,/g, ''));
+          if (i.value.trim() === '') { was.innerHTML = '<span class="muted">Left out</span>'; return; }
+          if (!isFinite(v) || v <= 0) { was.innerHTML = '<span class="delta down">Not a number</span>'; return; }
+          if (prev === '') { was.innerHTML = 'New'; return; }
+          var ch = Math.round((v - Number(prev)) * 100) / 100;
+          was.innerHTML = ch === 0 ? 'No change' : delta(ch);
+        });
+        var rates = collect().filter(function (r) { return isFinite(Number(r.rate)) && Number(r.rate) > 0; }).map(function (r) { return { currency: r.currency, category: r.category, rate: Number(r.rate) }; });
+        document.getElementById('pv').textContent = rates.length ? roeText(inputToWhen(form.effectiveAt.value), rates, form.note.value.trim()) : 'Enter at least one rate.';
+      }
+      form.addEventListener('input', refresh);
+      refresh();
+      document.getElementById('pv-copy').onclick = function () { copyText(document.getElementById('pv').textContent); };
+
+      function send(confirmLarge) {
+        var btn = document.getElementById('pub-btn');
+        btn.disabled = true;
+        return api('publish', {
+          requestId: requestId, effectiveAt: form.effectiveAt.value, rates: collect(), note: form.note.value,
+          sendEmail: form.sendEmail.checked, confirmLargeChange: !!confirmLarge
+        }).then(function (r) {
+          var msg = 'ROE published.';
+          if (r.email) msg += r.email.total ? ' Emailed ' + r.email.sent + ' of ' + r.email.total + ' heads of finance.' : ' No email recipients are set up.';
+          toast(msg, r.email && r.email.sent < r.email.total);
+          go('dashboard');
+        }).catch(function (e) {
+          btn.disabled = false;
+          if (e.code === 'CONFIRM_REQUIRED') {
+            return confirmBox('Please double check these rates', '<p>' + esc(e.error) + '</p><ul>' + e.extra.warnings.map(function (w) { return '<li class="num">' + esc(w) + '</li>'; }).join('') + '</ul>', 'Yes, publish them').then(function (ok) { if (ok) return send(true); });
+          }
+          fail(e);
+        });
+      }
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var rates = collect();
+        if (!rates.length) return toast('Enter at least one rate.', true);
+        var who = form.sendEmail.checked ? (rec.subsidiaries.length + ' heads of finance will be emailed straight away.') : 'No email will be sent. You can resend from ROE history later.';
+        confirmBox('Publish this ROE?', '<pre class="preview">' + esc(document.getElementById('pv').textContent) + '</pre><p class="small muted">' + esc(who) + '</p>', 'Publish').then(function (ok) { if (ok) send(false); });
+      });
+    });
+  };
+
+  VIEWS.history = function (el) {
+    var from = S.histFrom || daysAgo(30);
+    var to = S.histTo || isoDay(new Date());
+    return api('history', { from: from, to: to }).then(function (h) {
+      if (!stillOn('history')) return;
+      var cols = [];
+      (S.boot.categories || []).forEach(function (g) { g.categories.forEach(function (c) { cols.push({ currency: g.currency, displayName: g.displayName, category: c }); }); });
+      h.publications.forEach(function (p) { p.rates.forEach(function (r) {
+        if (!cols.some(function (c) { return c.currency === r.currency && c.category === r.category; })) cols.push({ currency: r.currency, displayName: r.currency, category: r.category });
+      }); });
+      var setter = can('RATE_SETTER');
+      var rows = h.publications.map(function (p) {
+        var map = {};
+        p.rates.forEach(function (r) { map[r.currency + '||' + r.category] = r; });
+        return '<tr class="' + (p.status === 'VOID' ? 'void' : '') + '"><td class="num keep" style="white-space:nowrap">' + esc(p.effectiveLabel) + '</td>' +
+          cols.map(function (c) {
+            var r = map[c.currency + '||' + c.category];
+            return '<td class="r num">' + (r ? fmt(r.rate) + (r.change ? '<div>' + delta(r.change) + '</div>' : '') : '<span class="muted">-</span>') + '</td>';
+          }).join('') +
+          '<td>' + esc(shortName(p.publishedBy)) + '</td><td class="keep">' + (p.status === 'VOID' ? '<span class="badge bad" title="' + esc(p.voidReason) + '">Void</span>' : emailBadge(p.emailStatus)) + '</td>' +
+          '<td class="keep" style="white-space:nowrap"><button class="btn sm" data-copy="' + esc(p.id) + '" title="Copy for WhatsApp">' + icon('copy') + '</button>' +
+          (setter && p.status !== 'VOID' ? ' <button class="btn sm" data-resend="' + esc(p.id) + '">Resend</button> <button class="btn sm danger" data-void="' + esc(p.id) + '">Void</button>' : '') + '</td></tr>';
+      }).join('');
+
+      el.innerHTML = '<div class="card"><div class="card-h"><h3>Broadcasts</h3>' +
+        '<label class="field"><span>From</span><input class="input" type="date" id="h-from" value="' + esc(from) + '"></label>' +
+        '<label class="field"><span>To</span><input class="input" type="date" id="h-to" value="' + esc(to) + '"></label>' +
+        '<button class="btn" id="h-go" style="align-self:end">Show</button><button class="btn" id="h-csv" style="align-self:end">' + icon('download') + 'Export CSV</button></div>' +
+        (h.publications.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Effective</th>' + cols.map(function (c) {
+          return '<th class="r">' + esc(c.displayName) + '<br><span style="text-transform:none;font-weight:600">' + esc(c.category) + '</span></th>';
+        }).join('') + '<th>Published by</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<div class="empty">No broadcasts in this period.</div>') +
+        '</div>';
+
+      document.getElementById('h-go').onclick = function () { S.histFrom = document.getElementById('h-from').value; S.histTo = document.getElementById('h-to').value; go('history'); };
+      document.getElementById('h-csv').onclick = function () {
+        var out = [['Publication ID', 'Effective', 'Currency', 'Category', 'Rate', 'Change', 'Published by', 'Status', 'Email status', 'Note']];
+        h.publications.forEach(function (p) { p.rates.forEach(function (r) { out.push([p.id, p.effectiveLabel, r.currency, r.category, r.rate, r.change, shortName(p.publishedBy), p.status, p.emailStatus, p.note]); }); });
+        downloadCsv('roe-history-' + from + '-to-' + to + '.csv', out);
+      };
+      function byId(id) { return h.publications.filter(function (p) { return p.id === id; })[0]; }
+      el.querySelectorAll('[data-copy]').forEach(function (b) { b.onclick = function () { var p = byId(b.getAttribute('data-copy')); copyText(roeText(labelToWhen(p.effectiveLabel), p.rates, p.note)); }; });
+      el.querySelectorAll('[data-resend]').forEach(function (b) { b.onclick = function () {
+        var p = byId(b.getAttribute('data-resend'));
+        confirmBox('Resend this ROE?', '<p>The ROE for <b>' + esc(p.effectiveLabel) + '</b> will be emailed again to every active head of finance.</p>', 'Resend').then(function (ok) {
+          if (!ok) return;
+          api('resend', { id: p.id }).then(function (r) { toast('Resent to ' + r.sent + ' of ' + r.total + '.'); go('history'); }).catch(fail);
+        });
+      }; });
+      el.querySelectorAll('[data-void]').forEach(function (b) { b.onclick = function () {
+        var p = byId(b.getAttribute('data-void'));
+        modal({ title: 'Void the ROE for ' + p.effectiveLabel, danger: true, ok: 'Void it',
+          body: '<p class="small">Voiding keeps the record for audit but stops it counting as a current rate. The rates before it become current again. Heads of finance are not emailed, so publish a corrected ROE if needed.</p>' +
+            '<label class="field"><span>Reason</span><textarea class="input" name="reason" required maxlength="300" placeholder="e.g. Typo in GBP Corporate - Invoice"></textarea></label>',
+          onOk: function (f) { return api('voidPublication', { id: p.id, reason: f.reason.value }).then(function () { toast('Publication voided.'); go('history'); }); }
+        });
+      }; });
+    });
+  };
+
+  VIEWS.book = function (el) {
+    return api('bookRates').then(function (b) {
+      if (!stillOn('book')) return;
+      el.innerHTML = '<div class="grid g2" style="align-items:start">' +
+        '<div class="card"><div class="card-h"><h3>Rate Log (book rates)</h3></div>' +
+        (b.entries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Effective date</th><th class="r">USD</th><th class="r">EUR</th><th class="r">GBP</th></tr></thead><tbody>' +
+          b.entries.map(function (e) { return '<tr><td>' + esc(e.label) + '</td><td class="r num">' + fmt(e.usd) + '</td><td class="r num">' + fmt(e.eur) + '</td><td class="r num">' + fmt(e.gbp) + '</td></tr>'; }).join('') +
+          '</tbody></table></div>' : '<div class="empty">No book rates yet.</div>') + '</div>' +
+        (can('RATE_SETTER') ? '<div class="card"><div class="card-h"><h3>Add a book rate</h3></div><form class="card-b stack" id="book-form" novalidate>' +
+          '<p class="small muted" style="margin:0">Works like the "currency conv" tab: type the USD rate and the USD cross rates from OANDA, and EUR and GBP are worked out as ROUNDDOWN(USD / cross, 2). You can also type EUR and GBP directly.</p>' +
+          '<div class="grid g2"><label class="field"><span>Effective date</span><input class="input" type="date" name="date" value="' + isoDay(new Date()) + '"></label>' +
+          '<label class="field"><span>USD (NGN)</span><input class="input num" name="usd" inputmode="decimal" placeholder="1348"></label>' +
+          '<label class="field"><span>USD to EUR cross</span><input class="input num" name="usdToEur" inputmode="decimal" placeholder="0.88858"></label>' +
+          '<label class="field"><span>or EUR (NGN)</span><input class="input num" name="eur" inputmode="decimal"></label>' +
+          '<label class="field"><span>USD to GBP cross</span><input class="input num" name="usdToGbp" inputmode="decimal" placeholder="0.75499"></label>' +
+          '<label class="field"><span>or GBP (NGN)</span><input class="input num" name="gbp" inputmode="decimal"></label></div>' +
+          '<div class="alert info" id="book-pv">Enter the USD rate to see the result.</div>' +
+          '<div class="row"><span class="spacer"></span><button class="btn primary" type="submit">Save to Rate Log</button></div></form></div>' : '') + '</div>';
+
+      var form = document.getElementById('book-form');
+      if (!form) return;
+      function calc(direct, cross, usd) {
+        if (direct.trim()) return Number(direct.replace(/,/g, ''));
+        var c = Number(cross);
+        return usd > 0 && c > 0 ? Math.floor(usd / c * 100) / 100 : null;
+      }
+      form.addEventListener('input', function () {
+        var usd = Number(form.usd.value.replace(/,/g, ''));
+        var eur = calc(form.eur.value, form.usdToEur.value, usd);
+        var gbp = calc(form.gbp.value, form.usdToGbp.value, usd);
+        document.getElementById('book-pv').innerHTML = usd > 0 ? 'USD <b class="num">' + fmt(usd) + '</b> &middot; EUR <b class="num">' + fmt(eur) + '</b> &middot; GBP <b class="num">' + fmt(gbp) + '</b>' : 'Enter the USD rate to see the result.';
+      });
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        api('addBookRate', { date: form.date.value, usd: form.usd.value.replace(/,/g, ''), eur: form.eur.value.replace(/,/g, ''), gbp: form.gbp.value.replace(/,/g, ''), usdToEur: form.usdToEur.value, usdToGbp: form.usdToGbp.value })
+          .then(function () { toast('Book rate saved.'); go('book'); }).catch(fail);
+      });
+    });
+  };
+
+  var ACTION_LABELS = {
+    LOGIN: 'Signed in', LOGOUT: 'Signed out', LOGIN_CODE_SENT: 'Sign in code sent', LOGIN_CODE_DENIED: 'Sign in refused (not on the portal)',
+    LOGIN_FAILED: 'Wrong sign in code', LOGIN_LOCKED: 'Locked out (too many wrong codes)', ACCESS_DENIED: 'Blocked from a restricted action',
+    SESSION_REVOKED: 'Session ended (access removed)', PUBLISH_ROE: 'Published ROE', VOID_ROE: 'Voided ROE', EMAIL_ROE: 'Emailed ROE',
+    RESEND_ROE: 'Resent ROE', TEST_EMAIL: 'Sent test email', ADD_USER: 'Added user', UPDATE_USER: 'Changed user', ADD_SUBSIDIARY: 'Added subsidiary',
+    UPDATE_SUBSIDIARY: 'Changed subsidiary', ADD_CATEGORY: 'Added rate category', UPDATE_CATEGORY: 'Changed rate category',
+    UPDATE_SETTINGS: 'Changed settings', ADD_BOOK_RATE: 'Added book rate', SETUP: 'Ran setup'
+  };
+  function auditDetails(raw) {
+    if (!raw) return '';
+    try {
+      var o = JSON.parse(raw);
+      if (o && typeof o === 'object') {
+        return Object.keys(o).map(function (k) {
+          var v = o[k];
+          return '<b>' + esc(k) + ':</b> ' + esc(Array.isArray(v) ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : v);
+        }).join(' &middot; ');
+      }
+    } catch (e) { /* plain text */ }
+    return esc(raw);
+  }
+
+  VIEWS.audit = function (el) {
+    var f = S.audit;
+    var load = f.tab === 'email' ? api('emailLog', {}) : api('audit', { category: f.category, q: f.q, from: f.from, to: f.to });
+    return load.then(function (a) {
+      if (!stillOn('audit')) return;
+      var tabs = '<div class="chips" role="tablist"><button data-tab="activity" class="' + (f.tab !== 'email' ? 'on' : '') + '">Activity &amp; access</button><button data-tab="email" class="' + (f.tab === 'email' ? 'on' : '') + '">Email delivery</button></div>';
+      var body;
+      if (f.tab === 'email') {
+        body = '<div class="card"><div class="card-h"><h3>Email delivery log</h3><button class="btn sm" id="a-csv">' + icon('download') + 'Export CSV</button></div>' +
+          (a.entries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Time</th><th>Type</th><th>Subsidiary</th><th>To</th><th>CC</th><th>Status</th><th>Publication</th></tr></thead><tbody>' +
+            a.entries.map(function (e) {
+              return '<tr><td class="num" style="white-space:nowrap">' + esc(e.label) + '</td><td>' + esc(e.type) + '</td><td>' + esc(e.subsidiary) + '</td><td>' + esc(e.to) + '</td><td class="small">' + esc(e.cc) + '</td>' +
+                '<td>' + (e.status === 'SENT' ? '<span class="badge ok">Sent</span>' : '<span class="badge bad" title="' + esc(e.detail) + '">Failed</span>') + '</td><td class="small muted">' + esc(e.publicationId) + '</td></tr>';
+            }).join('') + '</tbody></table></div>' : '<div class="empty">No emails sent yet.</div>') + '</div>';
+      } else {
+        var s = a.summary;
+        body = '<div class="grid g4" style="margin-bottom:16px">' +
+          [['Sign ins (30 days)', s.logins, s.activeUsers + ' different users'], ['Failed sign ins (30 days)', s.failed, 'Wrong codes, lockouts and unknown emails'],
+            ['Blocked actions (30 days)', s.denied, 'Users trying pages above their role'], ['Data changes (30 days)', s.changes, 'Rates, users, subsidiaries, settings']].map(function (t) {
+            return '<div class="card tile accent"><div class="label">' + t[0] + '</div><div class="value num">' + t[1] + '</div><div class="meta">' + t[2] + '</div></div>';
+          }).join('') + '</div>' +
+          '<div class="card"><div class="card-h"><div class="chips" role="group" aria-label="Type">' + [['', 'All'], ['ACCESS', 'Access'], ['CHANGE', 'Changes'], ['EMAIL', 'Email']].map(function (c) {
+            return '<button data-acat="' + c[0] + '" class="' + (f.category === c[0] ? 'on' : '') + '">' + c[1] + '</button>';
+          }).join('') + '</div><span class="spacer"></span>' +
+          '<input class="input" style="max-width:220px" id="a-q" placeholder="Search user or detail" value="' + esc(f.q) + '">' +
+          '<input class="input" style="max-width:160px" type="date" id="a-from" value="' + esc(f.from) + '" aria-label="From">' +
+          '<input class="input" style="max-width:160px" type="date" id="a-to" value="' + esc(f.to) + '" aria-label="To">' +
+          '<button class="btn" id="a-go">Filter</button><button class="btn" id="a-csv">' + icon('download') + 'CSV</button></div>' +
+          (a.entries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Time</th><th>User</th><th>Type</th><th>What happened</th><th>Details</th></tr></thead><tbody>' +
+            a.entries.map(function (e) {
+              var cls = e.category === 'ACCESS' ? (/FAILED|LOCKED|DENIED|REVOKED/.test(e.action) ? 'bad' : 'info') : e.category === 'EMAIL' ? 'warn' : 'ok';
+              return '<tr><td class="num" style="white-space:nowrap">' + esc(e.label) + '</td><td>' + esc(e.user) + '</td><td><span class="badge ' + cls + '">' + esc(e.category.charAt(0) + e.category.slice(1).toLowerCase()) + '</span></td>' +
+                '<td>' + esc(ACTION_LABELS[e.action] || e.action) + '</td><td class="details">' + auditDetails(e.details) + '</td></tr>';
+            }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing matches these filters.</div>') +
+          (a.truncated ? '<div class="card-b small muted">Showing the latest ' + a.entries.length + ' entries. Narrow the dates to see older ones, or open the Audit Log tab in the sheet.</div>' : '') + '</div>';
+      }
+      el.innerHTML = '<div class="row" style="margin-bottom:16px">' + tabs + '<span class="spacer"></span><span class="small muted">Every sign in, failed attempt and change is recorded and cannot be edited from the portal.</span></div>' + body;
+
+      el.querySelectorAll('[data-tab]').forEach(function (b) { b.onclick = function () { f.tab = b.getAttribute('data-tab'); go('audit'); }; });
+      el.querySelectorAll('[data-acat]').forEach(function (b) { b.onclick = function () { f.category = b.getAttribute('data-acat'); go('audit'); }; });
+      var goBtn = document.getElementById('a-go');
+      if (goBtn) {
+        goBtn.onclick = function () { f.q = document.getElementById('a-q').value; f.from = document.getElementById('a-from').value; f.to = document.getElementById('a-to').value; go('audit'); };
+        document.getElementById('a-q').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') goBtn.click(); });
+      }
+      document.getElementById('a-csv').onclick = function () {
+        if (f.tab === 'email') {
+          downloadCsv('email-log.csv', [['Time', 'Type', 'Subsidiary', 'To', 'CC', 'Status', 'Detail', 'Publication']].concat(a.entries.map(function (e) { return [e.label, e.type, e.subsidiary, e.to, e.cc, e.status, e.detail, e.publicationId]; })));
+        } else {
+          downloadCsv('audit-log.csv', [['Time', 'User', 'Type', 'Action', 'Details']].concat(a.entries.map(function (e) { return [e.label, e.user, e.category, ACTION_LABELS[e.action] || e.action, e.details]; })));
+        }
+      };
+    });
+  };
+
+  VIEWS.users = function (el) {
+    return Promise.all([api('users'), api('subsidiaries')]).then(function (res) {
+      if (!stillOn('users')) return;
+      var d = res[0];
+      var subs = res[1].subsidiaries;
+      el.innerHTML = '<div class="card"><div class="card-h"><h3>People with portal access</h3><button class="btn primary sm" id="u-add">' + icon('plus') + 'Add user</button></div>' +
+        '<div class="card-b small muted" style="padding-bottom:0">Administrators (CFO) can do everything. Rate setters (Financial Controller) publish rates. Viewers, such as heads of finance, can see rates and history.</div>' +
+        '<div class="table-wrap"><table class="t"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Subsidiary</th><th>Status</th><th>Last sign in</th><th></th></tr></thead><tbody>' +
+        d.users.map(function (u, i) {
+          return '<tr><td><b>' + esc(u.name) + '</b></td><td>' + esc(u.email) + '</td><td>' + esc(u.roleLabel) + '</td><td>' + esc(u.subsidiary) + '</td>' +
+            '<td>' + (u.active ? '<span class="badge ok">Active</span>' : '<span class="badge bad">Disabled</span>') + '</td><td class="num">' + esc(u.lastLoginLabel || 'Never') + '</td>' +
+            '<td><button class="btn sm" data-edit="' + i + '">Edit</button></td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+
+      function edit(u) {
+        modal({ title: u ? 'Edit ' + u.name : 'Add user',
+          body: '<label class="field"><span>Full name</span><input class="input" name="name" value="' + esc(u ? u.name : '') + '" required></label>' +
+            '<label class="field"><span>Work email</span><input class="input" name="email" type="email" value="' + esc(u ? u.email : '') + '"' + (u ? ' readonly' : '') + ' required></label>' +
+            '<label class="field"><span>Role</span><select class="input" name="role">' + d.roles.map(function (r) { return '<option value="' + r.value + '"' + ((u ? u.role : 'VIEWER') === r.value ? ' selected' : '') + '>' + esc(r.label) + '</option>'; }).join('') + '</select></label>' +
+            '<label class="field"><span>Subsidiary</span><input class="input" name="subsidiary" list="sub-list" value="' + esc(u ? u.subsidiary : '') + '"><datalist id="sub-list"><option value="Holdings">' + subs.map(function (s) { return '<option value="' + esc(s.name) + '">'; }).join('') + '</datalist></label>' +
+            '<label class="check"><input type="checkbox" name="active"' + (!u || u.active ? ' checked' : '') + '> Can sign in</label>',
+          onOk: function (f) {
+            return api('saveUser', { name: f.name.value, email: f.email.value, role: f.role.value, subsidiary: f.subsidiary.value, active: f.active.checked })
+              .then(function () { toast('User saved.'); go('users'); });
+          }
+        });
+      }
+      document.getElementById('u-add').onclick = function () { edit(null); };
+      el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { edit(d.users[Number(b.getAttribute('data-edit'))]); }; });
+    });
+  };
+
+  VIEWS.subsidiaries = function (el) {
+    return api('subsidiaries').then(function (d) {
+      if (!stillOn('subsidiaries')) return;
+      el.innerHTML = '<div class="card"><div class="card-h"><h3>Subsidiaries and heads of finance</h3><button class="btn primary sm" id="s-add">' + icon('plus') + 'Add subsidiary</button></div>' +
+        '<div class="card-b small muted" style="padding-bottom:0">Every active subsidiary gets an email each time an ROE is published. To let a head of finance also sign in to the portal, add them under Users &amp; access.</div>' +
+        (d.subsidiaries.length ? '<div class="table-wrap"><table class="t"><thead><tr><th>Code</th><th>Subsidiary</th><th>Head of finance</th><th>Email</th><th>CC</th><th>Status</th><th></th></tr></thead><tbody>' +
+          d.subsidiaries.map(function (s, i) {
+            return '<tr><td><b>' + esc(s.code) + '</b></td><td>' + esc(s.name) + '</td><td>' + esc(s.headName) + '</td><td>' + esc(s.headEmail) + '</td><td class="small">' + esc(s.cc) + '</td>' +
+              '<td>' + (s.active ? '<span class="badge ok">Receives ROE</span>' : '<span class="badge">Paused</span>') + '</td>' +
+              '<td style="white-space:nowrap"><button class="btn sm" data-edit="' + i + '">Edit</button> <button class="btn sm" data-test="' + i + '">Test email</button></td></tr>';
+          }).join('') + '</tbody></table></div>' : '<div class="empty">No subsidiaries yet. Add one to start emailing ROE updates.</div>') + '</div>';
+
+      function edit(s) {
+        modal({ title: s ? 'Edit ' + s.name : 'Add subsidiary',
+          body: '<div class="grid g2"><label class="field"><span>Code</span><input class="input" name="code" value="' + esc(s ? s.code : '') + '"' + (s ? ' readonly' : '') + ' placeholder="e.g. FGT" required></label>' +
+            '<label class="field"><span>Subsidiary name</span><input class="input" name="name" value="' + esc(s ? s.name : '') + '" required></label></div>' +
+            '<div class="grid g2"><label class="field"><span>Head of finance</span><input class="input" name="headName" value="' + esc(s ? s.headName : '') + '"></label>' +
+            '<label class="field"><span>Head of finance email</span><input class="input" type="email" name="headEmail" value="' + esc(s ? s.headEmail : '') + '" required></label></div>' +
+            '<label class="field"><span>CC emails (comma separated)</span><input class="input" name="cc" value="' + esc(s ? s.cc : '') + '"></label>' +
+            '<label class="check"><input type="checkbox" name="active"' + (!s || s.active ? ' checked' : '') + '> Send ROE emails to this subsidiary</label>',
+          onOk: function (f) {
+            return api('saveSubsidiary', { code: f.code.value, name: f.name.value, headName: f.headName.value, headEmail: f.headEmail.value, cc: f.cc.value, active: f.active.checked })
+              .then(function () { toast('Subsidiary saved.'); go('subsidiaries'); });
+          }
+        });
+      }
+      document.getElementById('s-add').onclick = function () { edit(null); };
+      el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { edit(d.subsidiaries[Number(b.getAttribute('data-edit'))]); }; });
+      el.querySelectorAll('[data-test]').forEach(function (b) { b.onclick = function () {
+        var s = d.subsidiaries[Number(b.getAttribute('data-test'))];
+        b.disabled = true;
+        api('testEmail', { code: s.code }).then(function (r) { toast('Test email sent to ' + r.to + '.'); }).catch(fail).then(function () { b.disabled = false; });
+      }; });
+    });
+  };
+
+  VIEWS.categories = function (el) {
+    return api('categories').then(function (d) {
+      if (!stillOn('categories')) return;
+      el.innerHTML = '<div class="card"><div class="card-h"><h3>Rate categories</h3><button class="btn primary sm" id="c-add">' + icon('plus') + 'Add category</button></div>' +
+        '<div class="card-b small muted" style="padding-bottom:0">These are the lines on the publish form and in the broadcast, in sort order. Turning a category off hides it from new broadcasts but keeps its history.</div>' +
+        '<div class="table-wrap"><table class="t"><thead><tr><th>Currency</th><th>Shown as</th><th>Category</th><th class="r">Sort</th><th>Status</th><th></th></tr></thead><tbody>' +
+        d.categories.map(function (c, i) {
+          return '<tr><td><b>' + esc(c.currency) + '</b></td><td>' + esc(c.displayName) + ' ROE</td><td>' + esc(c.category) + '</td><td class="r num">' + c.sortOrder + '</td>' +
+            '<td>' + (c.active ? '<span class="badge ok">On</span>' : '<span class="badge">Off</span>') + '</td><td><button class="btn sm" data-edit="' + i + '">Edit</button></td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+      function edit(c) {
+        modal({ title: c ? 'Edit ' + c.currency + ' ' + c.category : 'Add rate category',
+          body: '<div class="grid g2"><label class="field"><span>Currency code</span><input class="input" name="currency" maxlength="3" value="' + esc(c ? c.currency : '') + '"' + (c ? ' readonly' : '') + ' placeholder="USD"></label>' +
+            '<label class="field"><span>Shown as</span><input class="input" name="displayName" value="' + esc(c ? c.displayName : '') + '" placeholder="POUNDS"></label></div>' +
+            '<label class="field"><span>Category</span><input class="input" name="category" value="' + esc(c ? c.category : '') + '"' + (c ? ' readonly' : '') + ' placeholder="Corporate - Invoice"></label>' +
+            '<label class="field"><span>Sort order</span><input class="input" name="sortOrder" inputmode="numeric" value="' + esc(c ? c.sortOrder : 100) + '"></label>' +
+            '<label class="check"><input type="checkbox" name="active"' + (!c || c.active ? ' checked' : '') + '> Show on the publish form</label>',
+          onOk: function (f) {
+            return api('saveCategory', { currency: f.currency.value, displayName: f.displayName.value, category: f.category.value, sortOrder: f.sortOrder.value, active: f.active.checked })
+              .then(function () { toast('Category saved. Reloading.'); start(); });
+          }
+        });
+      }
+      document.getElementById('c-add').onclick = function () { edit(null); };
+      el.querySelectorAll('[data-edit]').forEach(function (b) { b.onclick = function () { edit(d.categories[Number(b.getAttribute('data-edit'))]); }; });
+    });
+  };
+
+  VIEWS.settings = function (el) {
+    return api('settings').then(function (d) {
+      if (!stillOn('settings')) return;
+      var labels = { COMPANY_NAME: 'Company name', LOGO_URL: 'Logo link (https)', PORTAL_NAME: 'Portal name', VALIDITY_NOTE: 'Default broadcast note', EMAIL_SUBJECT_PREFIX: 'Email subject prefix',
+        EMAIL_SENDER_NAME: 'Email sender name', REPLY_TO: 'Reply-to email', INTERNAL_COPY_EMAILS: 'Internal copy list', LARGE_CHANGE_PERCENT: 'Double check rates that move more than (%)', PORTAL_URL: 'Portal link for emails' };
+      el.innerHTML = '<div class="grid g2" style="align-items:start"><form class="card" id="set-form" novalidate><div class="card-h"><h3>Portal settings</h3></div><div class="card-b stack">' +
+        d.settings.map(function (s) {
+          var long = s.key === 'VALIDITY_NOTE' || s.key === 'INTERNAL_COPY_EMAILS';
+          return '<label class="field"><span>' + esc(labels[s.key] || s.key) + '</span>' + (long ? '<textarea class="input" name="' + s.key + '">' + esc(s.value) + '</textarea>' : '<input class="input" name="' + s.key + '" value="' + esc(s.value) + '">') +
+            '<div class="small muted" style="margin-top:4px">' + esc(s.description) + '</div></label>';
+        }).join('') + '<div class="row"><span class="spacer"></span><button class="btn primary" type="submit">Save settings</button></div></div></form>' +
+        '<div class="stack"><div class="card tile accent"><div class="label">Emails left today</div><div class="value num">' + (d.mailQuota === null ? '-' : fmt(d.mailQuota)) + '</div>' +
+        '<div class="meta">Google limits how many recipients the portal can email per day (about 100 for a personal Gmail account, 1,500 for Google Workspace). Each head of finance, CC and sign in code counts as one.</div></div>' +
+        '<div class="card"><div class="card-b small">Version ' + esc(d.version) + '. The data lives in the linked Google Sheet. Do not rename its tabs or header rows.</div></div></div></div>';
+      document.getElementById('set-form').addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var values = {};
+        d.settings.forEach(function (s) { values[s.key] = ev.target[s.key].value; });
+        api('saveSettings', { values: values }).then(function (r) { toast(r.changed.length ? 'Settings saved.' : 'Nothing changed.'); if (r.changed.length) start(); }).catch(fail);
+      });
+    });
+  };
+
+  var SOON = {
+    bsp: ['BSP tracking', 'Follow IATA BSP billing and remittance for every subsidiary in one place.', ['BSP billing periods and remittance due dates', 'Amounts due per subsidiary and per airline', 'Reminders before each remittance deadline', 'Reconciliation status for each period']],
+    receivables: ['Receivables', 'See what customers owe across the group and how old it is.', ['Outstanding balances by subsidiary and customer', 'Ageing buckets (0 to 30, 31 to 60, 61 to 90, over 90 days)', 'Collections progress against target', 'Exports for month end']],
+    credit: ['Credit control', 'Manage credit limits and keep corporate accounts within terms.', ['Credit limits and terms per corporate client', 'Alerts when an account goes over its limit', 'Promise to pay and follow up notes', 'Accounts on hold list shared with sales']],
+    invoices: ['Invoices', 'Track invoices raised by each subsidiary from issue to payment.', ['Invoice register with status (issued, sent, part paid, paid)', 'Invoices priced at the ROE in force when they were raised', 'Overdue invoice reminders', 'Search by client, subsidiary or invoice number']]
+  };
+  function viewSoon(el, id) {
+    var s = SOON[id];
+    var item = navItem(id).item;
+    el.innerHTML = '<div class="card soon-hero"><div class="icon">' + icon(item.icon) + '</div><span class="badge warn">Coming soon</span>' +
+      '<h2 style="margin:12px 0 6px">' + esc(s[0]) + '</h2><p class="muted" style="margin:0">' + esc(s[1]) + '</p>' +
+      '<ul>' + s[2].map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>';
+  }
+
+  /* ---------- boot ---------- */
+  api('config').then(function (c) {
+    S.config = c;
+    var t = store.get('fp_token');
+    if (t) { S.token = t; start(); } else renderLogin('email');
+  }).catch(function () { renderLogin('email'); });
+})();
+</script>
