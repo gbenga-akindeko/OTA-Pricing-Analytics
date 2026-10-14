@@ -81,7 +81,7 @@ var DEFAULT_CATEGORIES = [
 var DEFAULT_SUBSIDIARIES = [
   ['FGT', 'Finchglow Travels', 'Subsidiary', true],
   ['FCM', 'FCM Travel Solutions', 'Subsidiary', true],
-  ['HOL', 'Finchglow Holidays', 'Subsidiary', true],
+  ['FGH', 'Finchglow Holidays', 'Subsidiary', true],
   ['TVD', 'Travelden', 'Subsidiary', true],
   ['LAA', 'Lagos Aviation Academy', 'Subsidiary', true],
   ['FGB', 'Finchglobal', 'Subsidiary', true],

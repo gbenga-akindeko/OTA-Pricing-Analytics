@@ -20,7 +20,7 @@ export function seedDemo(rt) {
   ok(rt.call(admin, 'saveUser', { email: DEMO_USERS.viewer, name: 'Head of Finance (FGT)', role: 'VIEWER', subsidiary: 'Finchglow Travels' }));
 
   // Placeholder head of finance addresses for the six subsidiaries that setup adds.
-  [['FGT', 'Finchglow Travels'], ['FCM', 'FCM Travel Solutions'], ['HOL', 'Finchglow Holidays'], ['TVD', 'Travelden'], ['LAA', 'Lagos Aviation Academy'], ['FGB', 'Finchglobal']]
+  [['FGT', 'Finchglow Travels'], ['FCM', 'FCM Travel Solutions'], ['FGH', 'Finchglow Holidays'], ['TVD', 'Travelden'], ['LAA', 'Lagos Aviation Academy'], ['FGB', 'Finchglobal']]
     .forEach(([code, name]) => ok(rt.call(admin, 'saveSubsidiary', {
       code, name, type: 'Subsidiary', headName: 'Head of Finance (' + code + ')', headEmail: 'hof.' + code.toLowerCase() + '@example.com'
     })));
